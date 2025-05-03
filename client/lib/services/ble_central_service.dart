@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:bluetooth_low_energy/bluetooth_low_energy.dart';
 import 'package:logging/logging.dart';
 import 'package:permission_handler/permission_handler.dart';
+import '../ble_message.dart';
 
 /// BLE central for scanning manufacturer-specific advertisements
 class BleCentralService {
@@ -14,9 +15,9 @@ class BleCentralService {
   final StreamController<Uint8List> _dataController = StreamController<Uint8List>.broadcast();
   bool _isScanning = false;
   
-  // Store hashes of recently processed messages to avoid duplicates
-  final Set<String> _recentMessageHashes = {};
-  static const int _maxRecentMessages = 50; // Limit the size of the set to prevent memory issues
+  // Store message IDs of recently processed messages to avoid duplicates
+  final Set<String> _recentMessageIds = {};
+  static const int _maxRecentMessages = 100; // Increased to handle more messages
 
   /// Stream of raw manufacturer data bytes (id=0xFFFF)
   Stream<Uint8List> get dataStream => _dataController.stream;
@@ -53,11 +54,29 @@ class BleCentralService {
               if (msd.id == 0xFFFF) {
                 _logger.info('Discovered VuelingConnect data: ${msd.data.length} bytes');
                 
-                // Check if this is a duplicate message
-                if (!_isDuplicateMessage(msd.data)) {
+                // Process the message to check if it's a duplicate
+                try {
+                  final message = BleMessage.decode(msd.data);
+                  final messageId = message.messageId;
+                  
+                  // Check if we've seen this message ID before
+                  if (_recentMessageIds.contains(messageId)) {
+                    _logger.info('Rejected duplicate message with ID: $messageId');
+                  } else {
+                    // Add to recent messages and maintain size limit
+                    _recentMessageIds.add(messageId);
+                    if (_recentMessageIds.length > _maxRecentMessages) {
+                      _recentMessageIds.remove(_recentMessageIds.first);
+                    }
+                    
+                    // Pass the data to subscribers
+                    _dataController.add(msd.data);
+                    _logger.info('Processed new message with ID: $messageId, hop count: ${message.hopCount}');
+                  }
+                } catch (e) {
+                  _logger.warning('Error decoding BLE message: $e');
+                  // If we can't decode it, just pass it through
                   _dataController.add(msd.data);
-                } else {
-                  _logger.info('Rejected duplicate BLE message');
                 }
               }
             }
@@ -76,31 +95,6 @@ class BleCentralService {
       _logger.severe('Failed to start BLE discovery: $e');
       rethrow;
     }
-  }
-
-  /// Check if a message is a duplicate by computing a simple hash
-  bool _isDuplicateMessage(Uint8List data) {
-    // Create a simple hash of the message data
-    final hash = _computeMessageHash(data);
-    
-    // Check if we've seen this hash before
-    if (_recentMessageHashes.contains(hash)) {
-      return true;
-    }
-    
-    // Add to recent messages and maintain size limit
-    _recentMessageHashes.add(hash);
-    if (_recentMessageHashes.length > _maxRecentMessages) {
-      _recentMessageHashes.remove(_recentMessageHashes.first);
-    }
-    
-    return false;
-  }
-  
-  /// Compute a simple hash for a message
-  String _computeMessageHash(Uint8List data) {
-    // Simple hash function - convert bytes to hex string
-    return data.map((byte) => byte.toRadixString(16).padLeft(2, '0')).join();
   }
 
   /// Check and request Bluetooth permissions
@@ -153,7 +147,7 @@ class BleCentralService {
   void dispose() {
     stopDiscovery();
     _dataController.close();
-    _recentMessageHashes.clear();
+    _recentMessageIds.clear();
     _logger.info('Disposed BleCentralService');
   }
 }
