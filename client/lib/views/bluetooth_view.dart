@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'dart:convert';
 import 'dart:typed_data';
 import '../services/ble_central_service.dart';
 import '../services/ble_peripheral_service.dart';
@@ -24,6 +23,7 @@ class _BluetoothViewState extends State<BluetoothView> {
   late final BlePeripheralService _peripheralService;
 
   final List<BleMessage> _receivedMessages = [];
+  BleMessage? _currentBroadcastMessage;
 
   @override
   void initState() {
@@ -92,6 +92,7 @@ class _BluetoothViewState extends State<BluetoothView> {
                       await _peripheralService.stopBroadcast();
                       setState(() {
                         _isAdvertising = false;
+                        _currentBroadcastMessage = null;
                       });
                     } else {
                       // Select what to broadcast
@@ -121,6 +122,41 @@ class _BluetoothViewState extends State<BluetoothView> {
               ],
             ),
           ),
+
+          // Current broadcast message
+          if (_isAdvertising && _currentBroadcastMessage != null)
+            Card(
+              margin: const EdgeInsets.all(16.0),
+              color: Colors.black,
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          _getMessageIcon(_currentBroadcastMessage!),
+                          color: _getMessageColor(_currentBroadcastMessage!),
+                          size: 24,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Currently Broadcasting:',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      _getMessageTitle(_currentBroadcastMessage!),
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    Text(_getMessageDetails(_currentBroadcastMessage!)),
+                  ],
+                ),
+              ),
+            ),
 
           // Received messages list
           Expanded(
@@ -407,6 +443,7 @@ class _BluetoothViewState extends State<BluetoothView> {
     await _peripheralService.broadcastMessage(bleMessage.encode());
     setState(() {
       _isAdvertising = true;
+      _currentBroadcastMessage = bleMessage;
     });
 
     ScaffoldMessenger.of(context).showSnackBar(
@@ -424,6 +461,7 @@ class _BluetoothViewState extends State<BluetoothView> {
     await _peripheralService.broadcastMessage(bleMessage.encode());
     setState(() {
       _isAdvertising = true;
+      _currentBroadcastMessage = bleMessage;
     });
 
     ScaffoldMessenger.of(context).showSnackBar(
