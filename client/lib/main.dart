@@ -8,9 +8,23 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:logging/logging.dart';
+import 'package:provider/provider.dart';
 import 'theme.dart';
+import 'views/bluetooth_view.dart';
+import 'services/ble_central_service.dart';
+import 'services/ble_peripheral_service.dart';
 
 void main() {
+  // Set up logging
+  Logger.root.level = Level.ALL;
+  Logger.root.onRecord.listen((record) {
+    print('${record.level.name}: ${record.time}: ${record.message}');
+    if (record.error != null) {
+      print('Error: ${record.error}\nStack trace: ${record.stackTrace}');
+    }
+  });
+
   runApp(const MyApp());
 }
 
@@ -19,12 +33,21 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Vueling Connect',
-      theme: getLightTheme(),
-      darkTheme: getDarkTheme(),
-      themeMode: ThemeMode.dark, // Force dark mode
-      home: const MyHomePage(title: 'Vueling Connect'),
+    return MultiProvider(
+      providers: [
+        Provider<BleCentralService>(
+          create: (_) => BleCentralService(),
+          dispose: (_, service) => service.dispose(),
+        ),
+        Provider<BlePeripheralService>(create: (_) => BlePeripheralService()),
+      ],
+      child: MaterialApp(
+        title: 'Vueling Connect',
+        theme: getLightTheme(),
+        darkTheme: getDarkTheme(),
+        themeMode: ThemeMode.dark, // Force dark mode
+        home: const MyHomePage(title: 'Vueling Connect'),
+      ),
     );
   }
 }
@@ -46,8 +69,7 @@ class _MyHomePageState extends State<MyHomePage> {
   Map<String, dynamic>? _flightInfo;
   bool _isLoading = false;
   String _errorMessage = '';
-  String _serverAddress =
-      'localhost'; // Change to your computer's IP when testing on a real device
+  String _serverAddress = 'localhost';
   String _serverPort = '8000';
 
   // Stored flight information
@@ -58,6 +80,7 @@ class _MyHomePageState extends State<MyHomePage> {
     super.initState();
     _initBluetooth();
     _loadSavedFlights();
+    _loadServerSettings();
   }
 
   Future<void> _loadSavedFlights() async {
@@ -75,9 +98,23 @@ class _MyHomePageState extends State<MyHomePage> {
     }
   }
 
+  Future<void> _loadServerSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _serverAddress = prefs.getString('serverAddress') ?? 'localhost';
+      _serverPort = prefs.getString('serverPort') ?? '8000';
+    });
+  }
+
   Future<void> _saveFlights() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('savedFlights', jsonEncode(_savedFlights));
+  }
+
+  Future<void> _saveServerSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('serverAddress', _serverAddress);
+    await prefs.setString('serverPort', _serverPort);
   }
 
   // Update existing flight or add new one if it doesn't exist
@@ -168,7 +205,7 @@ class _MyHomePageState extends State<MyHomePage> {
 
     // Use 10.0.2.2 instead of localhost when running on Android emulator
     String host = _serverAddress;
-    if (!kIsWeb && Platform.isAndroid) {
+    if (!kIsWeb && Platform.isAndroid && host == 'localhost') {
       // 10.0.2.2 is the special IP for host machine when using Android emulator
       host = '10.0.2.2';
     }
@@ -310,6 +347,11 @@ class _MyHomePageState extends State<MyHomePage> {
             icon: const Icon(Icons.list),
             onPressed: _showSavedFlights,
             tooltip: 'Saved Flights',
+          ),
+          IconButton(
+            icon: const Icon(Icons.bluetooth),
+            onPressed: _navigateToBluetoothView,
+            tooltip: 'Bluetooth Mesh',
           ),
         ],
       ),
@@ -456,6 +498,8 @@ class _MyHomePageState extends State<MyHomePage> {
                     _serverAddress = addressController.text;
                     _serverPort = portController.text;
                   });
+                  // Save to shared preferences
+                  _saveServerSettings();
                   Navigator.pop(context);
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
@@ -515,4 +559,15 @@ class _MyHomePageState extends State<MyHomePage> {
           ),
     );
   }
+
+  void _navigateToBluetoothView() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => BluetoothView(savedFlights: _savedFlights),
+      ),
+    );
+  }
+
+  // Use the getStatusColor from theme.dart
 }
