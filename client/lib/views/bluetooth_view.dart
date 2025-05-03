@@ -11,6 +11,7 @@ import '../ble_message.dart';
 import '../utils/string_utils.dart';
 import '../theme.dart';
 import '../providers/bluetooth_state_provider.dart';
+import '../widgets/action_button.dart';
 
 class BluetoothView extends StatefulWidget {
   final List<Map<String, dynamic>> savedFlights;
@@ -155,85 +156,96 @@ class _BluetoothViewState extends State<BluetoothView> {
           // Control buttons
           Padding(
             padding: const EdgeInsets.all(16.0),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                Column(
-                  children: [
-                    ElevatedButton(
-                      onPressed: () async {
-                        if (bluetoothProvider.isScanning) {
-                          await _centralService.stopDiscovery();
-                          bluetoothProvider.setScanning(false);
-                        } else {
-                          await _centralService.startDiscovery();
-                          bluetoothProvider.setScanning(true);
-                        }
-                      },
-                      child: Text(
-                        bluetoothProvider.isScanning
-                            ? 'Stop Scan'
-                            : 'Start Scan',
+            child: Container(
+              decoration: BoxDecoration(
+                color: Theme.of(
+                  context,
+                ).colorScheme.surfaceContainerHighest.withOpacity(0.3),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      // Scan button
+                      Expanded(
+                        flex: 1,
+                        child: ActionButton(
+                          context: context,
+                          icon:
+                              bluetoothProvider.isScanning
+                                  ? Icons.bluetooth_searching
+                                  : Icons.bluetooth_disabled,
+                          label:
+                              bluetoothProvider.isScanning
+                                  ? 'Stop Scan'
+                                  : 'Start Scan',
+                          isActive: bluetoothProvider.isScanning,
+                          onPressed: () async {
+                            if (bluetoothProvider.isScanning) {
+                              await _centralService.stopDiscovery();
+                              bluetoothProvider.setScanning(false);
+                            } else {
+                              await _centralService.startDiscovery();
+                              bluetoothProvider.setScanning(true);
+                            }
+                          },
+                        ),
                       ),
-                    ),
-                    ElevatedButton(
-                      onPressed: () async {
-                        if (bluetoothProvider.isAdvertising) {
-                          await _peripheralService.stopBroadcast();
-                          bluetoothProvider.setAdvertising(false);
-                          _messageStore.stopAutoRelay();
-                          bluetoothProvider.setAutoRelayEnabled(false);
-                          setState(() {});
-                        } else {
-                          // Start auto-relay
-                          _startAutoRelay();
-                        }
-                      },
-                      child: Text(
-                        bluetoothProvider.isAdvertising
-                            ? 'Stop Broadcast'
-                            : 'Start Broadcast',
-                      ),
-                    ),
-                  ],
-                ),
-                ElevatedButton(
-                  onPressed: () {
-                    _showAlertSelectionDialog();
-                  },
-                  child: const Text('Send Alert'),
-                ),
-              ],
-            ),
-          ),
 
-          // Connection status
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Status:', style: Theme.of(context).textTheme.titleMedium),
-                const SizedBox(height: 8),
-                Text(
-                  'Scanning: ${bluetoothProvider.isScanning ? "Active" : "Inactive"}',
-                ),
-                Text(
-                  'Broadcasting: ${bluetoothProvider.isAdvertising ? "Active" : "Inactive"}',
-                ),
-                if (bluetoothProvider.isAutoRelayEnabled)
-                  Text(
-                    'Auto-Relay: Active (Broadcasting all messages)',
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.primary,
-                      fontWeight: FontWeight.bold,
-                    ),
+                      const SizedBox(width: 8),
+
+                      // Broadcast button
+                      Expanded(
+                        flex: 1,
+                        child: ActionButton(
+                          context: context,
+                          icon:
+                              bluetoothProvider.isAdvertising
+                                  ? Icons.wifi_tethering
+                                  : Icons.wifi_tethering_off,
+                          label:
+                              bluetoothProvider.isAdvertising
+                                  ? 'Stop Broadcast'
+                                  : 'Start Broadcast',
+                          isActive: bluetoothProvider.isAdvertising,
+                          onPressed: () async {
+                            if (bluetoothProvider.isAdvertising) {
+                              await _peripheralService.stopBroadcast();
+                              bluetoothProvider.setAdvertising(false);
+                              _messageStore.stopAutoRelay();
+                              bluetoothProvider.setAutoRelayEnabled(false);
+                              setState(() {});
+                            } else {
+                              // Start auto-relay
+                              _startAutoRelay();
+                            }
+                          },
+                        ),
+                      ),
+
+                      const SizedBox(width: 8),
+
+                      // Alert button
+                      Expanded(
+                        flex: 1,
+                        child: ActionButton(
+                          context: context,
+                          icon: Icons.warning_amber_rounded,
+                          label: 'Send Alert',
+                          isActive: false,
+                          highlightColor: Colors.red,
+                          onPressed: () {
+                            _showAlertSelectionDialog();
+                          },
+                        ),
+                      ),
+                    ],
                   ),
-                Text(
-                  'Role: ${bluetoothProvider.isSourceDevice ? "Source" : "Relay"}',
-                ),
-                Text('Received Messages: ${_receivedMessages.length}'),
-              ],
+                ],
+              ),
             ),
           ),
 
@@ -303,7 +315,7 @@ class _BluetoothViewState extends State<BluetoothView> {
                     vertical: 8.0,
                   ),
                   child: Text(
-                    'Received Messages:',
+                    'Received Messages (${_receivedMessages.length + _apiMessages.length}):',
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                 ),
