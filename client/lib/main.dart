@@ -124,34 +124,61 @@ class _MyHomePageState extends State<MyHomePage> {
 
   // Update existing flight or add new one if it doesn't exist
   void _updateFlightInfo(Map<String, dynamic> newFlight) {
+    // Validate that we have at least a flight number
     final flightNumber = newFlight['flight_number'];
+    if (flightNumber == null) {
+      print('Cannot update flight info: Missing flight number');
+      return;
+    }
+
     final index = _savedFlights.indexWhere(
       (flight) => flight['flight_number'] == flightNumber,
     );
 
+    // Make sure all required fields exist with defaults if needed
+    final updatedFlight = {
+      'flight_number': flightNumber,
+      'flight_status': newFlight['flight_status'] ?? 'unknown',
+      'timestamp': newFlight['timestamp'] ?? DateTime.now().toIso8601String(),
+      'flight_message':
+          newFlight['flight_message'] ??
+          _getFlightStatusMessage(newFlight['flight_status']),
+    };
+
     if (index != -1) {
       // Flight exists, check timestamp
-      final DateTime existingTimestamp = DateTime.parse(
-        _savedFlights[index]['timestamp'],
-      );
-      final DateTime newTimestamp = DateTime.parse(newFlight['timestamp']);
+      try {
+        final DateTime existingTimestamp = DateTime.parse(
+          _savedFlights[index]['timestamp'] ?? '',
+        );
+        final DateTime newTimestamp = DateTime.parse(
+          updatedFlight['timestamp'],
+        );
 
-      if (newTimestamp.isAfter(existingTimestamp)) {
+        if (newTimestamp.isAfter(existingTimestamp)) {
+          setState(() {
+            _savedFlights[index] = updatedFlight;
+            _flightInfo = updatedFlight;
+          });
+        } else {
+          // Use existing flight info if it's newer
+          setState(() {
+            _flightInfo = _savedFlights[index];
+          });
+        }
+      } catch (e) {
+        // If there's an issue with timestamp parsing, just update with new info
         setState(() {
-          _savedFlights[index] = newFlight;
-          _flightInfo = newFlight;
+          _savedFlights[index] = updatedFlight;
+          _flightInfo = updatedFlight;
         });
-      } else {
-        // Use existing flight info if it's newer
-        setState(() {
-          _flightInfo = _savedFlights[index];
-        });
+        print('Error parsing timestamps: $e');
       }
     } else {
       // New flight, add it
       setState(() {
-        _savedFlights.add(newFlight);
-        _flightInfo = newFlight;
+        _savedFlights.add(updatedFlight);
+        _flightInfo = updatedFlight;
       });
     }
 
@@ -160,8 +187,21 @@ class _MyHomePageState extends State<MyHomePage> {
 
   // Save an alert
   void _addAlert(Map<String, dynamic> alert) {
+    // Make sure we have the minimum required fields
+    if (alert['alert_type'] == null) {
+      print('Cannot add alert: Missing alert type');
+      return;
+    }
+
+    // Ensure all required fields have values
+    final safeAlert = {
+      'alert_type': alert['alert_type'],
+      'timestamp': alert['timestamp'] ?? DateTime.now().toIso8601String(),
+      'message': alert['message'] ?? _getAlertMessage(alert['alert_type']),
+    };
+
     setState(() {
-      _activeAlerts.add(alert);
+      _activeAlerts.add(safeAlert);
     });
   }
 
@@ -233,31 +273,39 @@ class _MyHomePageState extends State<MyHomePage> {
         for (var msg in messages) {
           String msgType = msg['msg_type'];
 
-          if (msgType == 'flightStatus' &&
-              msg['flight_number'] != null &&
-              msg['status'] != null) {
-            // Convert to our format
-            final flight = {
-              'flight_number': msg['flight_number'],
-              'flight_status': msg['status'],
-              'timestamp':
-                  DateTime.fromMillisecondsSinceEpoch(
-                    msg['timestamp'] * 1000,
-                  ).toIso8601String(),
-              'flight_message': _getFlightStatusMessage(msg['status']),
-            };
-            _updateFlightInfo(flight);
-          } else if (msgType == 'alert' && msg['alert_type'] != null) {
-            // Process alert
-            final alert = {
-              'alert_type': msg['alert_type'],
-              'timestamp':
-                  DateTime.fromMillisecondsSinceEpoch(
-                    msg['timestamp'] * 1000,
-                  ).toIso8601String(),
-              'message': _getAlertMessage(msg['alert_type']),
-            };
-            _addAlert(alert);
+          if (msgType == 'flightStatus') {
+            // Only process if we have the minimum required fields
+            if (msg['flight_number'] != null) {
+              // Convert to our format
+              final flight = {
+                'flight_number': msg['flight_number'],
+                'flight_status': msg['status'] ?? 'unknown',
+                'timestamp':
+                    DateTime.fromMillisecondsSinceEpoch(
+                      (msg['timestamp'] is int)
+                          ? msg['timestamp'] * 1000
+                          : int.parse(msg['timestamp'].toString()) * 1000,
+                    ).toIso8601String(),
+                'flight_message': _getFlightStatusMessage(msg['status']),
+              };
+              _updateFlightInfo(flight);
+            }
+          } else if (msgType == 'alert') {
+            // Only process if we have the minimum required fields
+            if (msg['alert_type'] != null && msg['timestamp'] != null) {
+              // Process alert
+              final alert = {
+                'alert_type': msg['alert_type'],
+                'timestamp':
+                    DateTime.fromMillisecondsSinceEpoch(
+                      (msg['timestamp'] is int)
+                          ? msg['timestamp'] * 1000
+                          : int.parse(msg['timestamp'].toString()) * 1000,
+                    ).toIso8601String(),
+                'message': _getAlertMessage(msg['alert_type']),
+              };
+              _addAlert(alert);
+            }
           }
         }
 
@@ -317,7 +365,9 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   // Helper to get flight status message
-  String _getFlightStatusMessage(String status) {
+  String _getFlightStatusMessage(String? status) {
+    if (status == null) return 'Flight status unknown.';
+
     switch (status) {
       case 'scheduled':
         return 'Your flight is scheduled to depart as planned.';
@@ -335,7 +385,9 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   // Helper to get alert message
-  String _getAlertMessage(String alertType) {
+  String _getAlertMessage(String? alertType) {
+    if (alertType == null) return 'Unknown alert.';
+
     switch (alertType) {
       case 'medical':
         return 'Medical emergency alert. If you are a doctor or medical professional, please identify yourself to cabin crew.';
@@ -351,7 +403,9 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   // Get color for alert type
-  Color _getAlertColor(String alertType) {
+  Color _getAlertColor(String? alertType) {
+    if (alertType == null) return Colors.grey;
+
     switch (alertType) {
       case 'medical':
         return Colors.blue;
@@ -368,6 +422,11 @@ class _MyHomePageState extends State<MyHomePage> {
 
   // Show alert details dialog
   void _showAlertDialog(Map<String, dynamic> alert) {
+    // Validate required fields exist with reasonable defaults
+    final alertType = alert['alert_type'];
+    final message = alert['message'] ?? 'No message available';
+    final timestamp = alert['timestamp'] ?? DateTime.now().toIso8601String();
+
     showDialog(
       context: context,
       builder:
@@ -375,8 +434,8 @@ class _MyHomePageState extends State<MyHomePage> {
             title: Row(
               children: [
                 Icon(
-                  _getAlertIcon(alert['alert_type']),
-                  color: _getAlertColor(alert['alert_type']),
+                  _getAlertIcon(alertType),
+                  color: _getAlertColor(alertType),
                 ),
                 const SizedBox(width: 8),
                 const Text('Alert'),
@@ -387,12 +446,12 @@ class _MyHomePageState extends State<MyHomePage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  alert['message'],
+                  message,
                   style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Time: ${_formatDateTime(alert['timestamp'])}',
+                  'Time: ${_formatDateTime(timestamp)}',
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
               ],
@@ -408,7 +467,9 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   // Get icon for alert type
-  IconData _getAlertIcon(String alertType) {
+  IconData _getAlertIcon(String? alertType) {
+    if (alertType == null) return Icons.notification_important;
+
     switch (alertType) {
       case 'medical':
         return Icons.medical_services;
@@ -435,6 +496,12 @@ class _MyHomePageState extends State<MyHomePage> {
     Map<String, dynamic> flight, {
     bool isExpanded = false,
   }) {
+    // Validate required fields exist with reasonable defaults
+    final flightNumber = flight['flight_number'] ?? 'Unknown';
+    final flightStatus = flight['flight_status'] ?? 'unknown';
+    final flightMessage = flight['flight_message'] ?? 'No message available';
+    final timestamp = flight['timestamp'] ?? DateTime.now().toIso8601String();
+
     final cardContent = Card(
       elevation: 4,
       margin: isExpanded ? EdgeInsets.zero : const EdgeInsets.only(bottom: 12),
@@ -444,22 +511,22 @@ class _MyHomePageState extends State<MyHomePage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Flight ${flight['flight_number']}',
+              'Flight $flightNumber',
               style: Theme.of(context).textTheme.titleLarge,
             ),
             const SizedBox(height: 8),
             Text(
-              'Status: ${_capitalizeFirstLetter(flight['flight_status'])}',
+              'Status: ${_capitalizeFirstLetter(flightStatus)}',
               style: TextStyle(
                 fontWeight: FontWeight.bold,
-                color: getStatusColor(flight['flight_status']),
+                color: getStatusColor(flightStatus),
               ),
             ),
             const SizedBox(height: 8),
-            Text(flight['flight_message']),
+            Text(flightMessage),
             const SizedBox(height: 8),
             Text(
-              'Last Updated: ${_formatDateTime(flight['timestamp'])}',
+              'Last Updated: ${_formatDateTime(timestamp)}',
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ],
@@ -476,22 +543,27 @@ class _MyHomePageState extends State<MyHomePage> {
 
   // Alert card widget
   Widget _buildAlertCard(Map<String, dynamic> alert) {
+    // Validate required fields exist with reasonable defaults
+    final alertType = alert['alert_type'];
+    final message = alert['message'] ?? 'No message available';
+    final timestamp = alert['timestamp'] ?? DateTime.now().toIso8601String();
+
     return Card(
       elevation: 4,
-      color: _getAlertColor(alert['alert_type']).withOpacity(0.2),
+      color: _getAlertColor(alertType).withOpacity(0.2),
       margin: const EdgeInsets.only(bottom: 12),
       child: ListTile(
         leading: Icon(
-          _getAlertIcon(alert['alert_type']),
-          color: _getAlertColor(alert['alert_type']),
+          _getAlertIcon(alertType),
+          color: _getAlertColor(alertType),
         ),
         title: Text(
-          _capitalizeFirstLetter(alert['alert_type']),
+          _capitalizeFirstLetter(alertType),
           style: const TextStyle(fontWeight: FontWeight.bold),
         ),
-        subtitle: Text(alert['message']),
+        subtitle: Text(message),
         trailing: Text(
-          _formatDateTime(alert['timestamp']).split(' ')[1], // Just show time
+          _formatDateTime(timestamp).split(' ')[1], // Just show time
           style: Theme.of(context).textTheme.bodySmall,
         ),
         onTap: () => _showAlertDialog(alert),
@@ -499,8 +571,8 @@ class _MyHomePageState extends State<MyHomePage> {
     );
   }
 
-  String _capitalizeFirstLetter(String text) {
-    if (text.isEmpty) return text;
+  String _capitalizeFirstLetter(String? text) {
+    if (text == null || text.isEmpty) return text ?? '';
     return text[0].toUpperCase() + text.substring(1);
   }
 
@@ -642,7 +714,9 @@ class _MyHomePageState extends State<MyHomePage> {
     );
   }
 
-  String _formatDateTime(String isoString) {
+  String _formatDateTime(String? isoString) {
+    if (isoString == null) return 'Unknown';
+
     try {
       final dateTime = DateTime.parse(isoString);
       return '${dateTime.day}/${dateTime.month}/${dateTime.year} ${dateTime.hour}:${dateTime.minute}';

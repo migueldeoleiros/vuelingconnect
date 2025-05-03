@@ -61,7 +61,9 @@ ThemeData getDarkTheme() {
 }
 
 // Status colors optimized for dark mode
-Color getStatusColor(String status) {
+Color getStatusColor(String? status) {
+  if (status == null) return Colors.grey[300]!;
+
   switch (status.toLowerCase()) {
     case 'scheduled':
       return Colors.blue[300]!;
