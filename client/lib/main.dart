@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:http/http.dart' as http;
+import 'theme.dart';
 
 void main() {
   runApp(const MyApp());
@@ -19,9 +20,9 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Vueling Connect',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.yellow),
-      ),
+      theme: getLightTheme(),
+      darkTheme: getDarkTheme(),
+      themeMode: ThemeMode.dark, // Force dark mode
       home: const MyHomePage(title: 'Vueling Connect'),
     );
   }
@@ -160,7 +161,8 @@ class _MyHomePageState extends State<MyHomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: Colors.yellow,
+        backgroundColor: Theme.of(context).colorScheme.primary,
+        foregroundColor: Colors.black,
         title: Text(widget.title),
         actions: [
           IconButton(
@@ -188,7 +190,6 @@ class _MyHomePageState extends State<MyHomePage> {
                     controller: _flightNumberController,
                     decoration: const InputDecoration(
                       labelText: 'Enter Flight Number (e.g., VY2375)',
-                      border: OutlineInputBorder(),
                     ),
                   ),
                 ),
@@ -225,7 +226,7 @@ class _MyHomePageState extends State<MyHomePage> {
                         'Status: ${_flightInfo!['flight_status']}',
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
-                          color: _getStatusColor(_flightInfo!['flight_status']),
+                          color: getStatusColor(_flightInfo!['flight_status']),
                         ),
                       ),
                       const SizedBox(height: 8),
@@ -243,23 +244,6 @@ class _MyHomePageState extends State<MyHomePage> {
         ),
       ),
     );
-  }
-
-  Color _getStatusColor(String status) {
-    switch (status) {
-      case 'Scheduled':
-        return Colors.blue;
-      case 'Departed':
-        return Colors.green;
-      case 'Arrived':
-        return Colors.purple;
-      case 'Delayed':
-        return Colors.orange;
-      case 'Cancelled':
-        return Colors.red;
-      default:
-        return Colors.grey;
-    }
   }
 
   String _formatDateTime(String isoString) {
