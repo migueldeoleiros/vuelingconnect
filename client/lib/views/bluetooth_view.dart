@@ -5,6 +5,7 @@ import '../services/ble_central_service.dart';
 import '../services/ble_peripheral_service.dart';
 import '../ble_message.dart';
 import '../utils/string_utils.dart';
+import '../widgets/message_cards.dart';
 
 class BluetoothView extends StatefulWidget {
   final List<Map<String, dynamic>> savedFlights;
@@ -126,37 +127,57 @@ class _BluetoothViewState extends State<BluetoothView> {
 
           // Current broadcast message
           if (_isAdvertising && _currentBroadcastMessage != null)
-            Card(
-              margin: const EdgeInsets.all(16.0),
-              color: Colors.black,
-              child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(
-                          _getMessageIcon(_currentBroadcastMessage!),
-                          color: _getMessageColor(_currentBroadcastMessage!),
-                          size: 24,
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          'Currently Broadcasting:',
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      _getMessageTitle(_currentBroadcastMessage!),
-                      style: const TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    Text(_getMessageDetails(_currentBroadcastMessage!)),
-                  ],
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16.0,
+                    vertical: 8.0,
+                  ),
+                  child: Text(
+                    'Currently Broadcasting:',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
                 ),
-              ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                  child:
+                      _currentBroadcastMessage!.msgType == MsgType.flightStatus
+                          ? FlightCard(
+                            flight: {
+                              'flight_number':
+                                  _currentBroadcastMessage!.flightNumber,
+                              'flight_status':
+                                  _currentBroadcastMessage!.status
+                                      .toString()
+                                      .split('.')
+                                      .last,
+                              'flight_message':
+                                  'This flight information is being broadcast',
+                              'timestamp':
+                                  DateTime.fromMillisecondsSinceEpoch(
+                                    _currentBroadcastMessage!.timestamp * 1000,
+                                  ).toIso8601String(),
+                            },
+                            isExpanded: true,
+                          )
+                          : AlertCard(
+                            alert: {
+                              'alert_type':
+                                  _currentBroadcastMessage!.alertMessage
+                                      .toString()
+                                      .split('.')
+                                      .last,
+                              'message': 'This alert is being broadcast',
+                              'timestamp':
+                                  DateTime.fromMillisecondsSinceEpoch(
+                                    _currentBroadcastMessage!.timestamp * 1000,
+                                  ).toIso8601String(),
+                            },
+                          ),
+                ),
+              ],
             ),
 
           // Received messages list
@@ -168,103 +189,41 @@ class _BluetoothViewState extends State<BluetoothView> {
                       itemCount: _receivedMessages.length,
                       itemBuilder: (context, index) {
                         final message = _receivedMessages[index];
-                        return Card(
-                          margin: const EdgeInsets.symmetric(
-                            horizontal: 16.0,
-                            vertical: 8.0,
-                          ),
-                          child: ListTile(
-                            title: Text(_getMessageTitle(message)),
-                            subtitle: Text(_getMessageDetails(message)),
-                            leading: Icon(
-                              _getMessageIcon(message),
-                              color: _getMessageColor(message),
-                            ),
-                          ),
-                        );
+                        if (message.msgType == MsgType.flightStatus) {
+                          return FlightCard(
+                            flight: {
+                              'flight_number': message.flightNumber,
+                              'flight_status':
+                                  message.status.toString().split('.').last,
+                              'flight_message': 'Received flight update',
+                              'timestamp':
+                                  DateTime.fromMillisecondsSinceEpoch(
+                                    message.timestamp * 1000,
+                                  ).toIso8601String(),
+                            },
+                          );
+                        } else {
+                          return AlertCard(
+                            alert: {
+                              'alert_type':
+                                  message.alertMessage
+                                      .toString()
+                                      .split('.')
+                                      .last,
+                              'message': 'Alert received via Bluetooth',
+                              'timestamp':
+                                  DateTime.fromMillisecondsSinceEpoch(
+                                    message.timestamp * 1000,
+                                  ).toIso8601String(),
+                            },
+                          );
+                        }
                       },
                     ),
           ),
         ],
       ),
     );
-  }
-
-  // Helper methods for message display
-  String _getMessageTitle(BleMessage message) {
-    if (message.msgType == MsgType.flightStatus) {
-      return 'Flight ${message.flightNumber}';
-    } else {
-      return 'Alert: ${_getAlertName(message.alertMessage!)}';
-    }
-  }
-
-  String _getMessageDetails(BleMessage message) {
-    if (message.msgType == MsgType.flightStatus) {
-      final dateTime = DateTime.fromMillisecondsSinceEpoch(
-        message.timestamp * 1000,
-      );
-      final statusText = capitalizeFirstLetter(
-        message.status.toString().split('.').last,
-      );
-      return 'Status: $statusText\nTime: ${dateTime.hour}:${dateTime.minute}';
-    } else {
-      final dateTime = DateTime.fromMillisecondsSinceEpoch(
-        message.timestamp * 1000,
-      );
-      return 'Time: ${dateTime.hour}:${dateTime.minute}';
-    }
-  }
-
-  IconData _getMessageIcon(BleMessage message) {
-    if (message.msgType == MsgType.flightStatus) {
-      return Icons.flight;
-    } else {
-      switch (message.alertMessage) {
-        case AlertMessage.medical:
-          return Icons.medical_services;
-        case AlertMessage.evacuation:
-          return Icons.exit_to_app;
-        case AlertMessage.fire:
-          return Icons.local_fire_department;
-        case AlertMessage.aliens:
-          return Icons.warning;
-        default:
-          return Icons.notification_important;
-      }
-    }
-  }
-
-  Color _getMessageColor(BleMessage message) {
-    if (message.msgType == MsgType.flightStatus) {
-      switch (message.status) {
-        case FlightStatus.scheduled:
-          return Colors.blue;
-        case FlightStatus.departed:
-          return Colors.green;
-        case FlightStatus.arrived:
-          return Colors.purple;
-        case FlightStatus.delayed:
-          return Colors.orange;
-        case FlightStatus.cancelled:
-          return Colors.red;
-        default:
-          return Colors.grey;
-      }
-    } else {
-      switch (message.alertMessage) {
-        case AlertMessage.medical:
-          return Colors.blue;
-        case AlertMessage.evacuation:
-          return Colors.red;
-        case AlertMessage.fire:
-          return Colors.orange;
-        case AlertMessage.aliens:
-          return Colors.purple;
-        default:
-          return Colors.grey;
-      }
-    }
   }
 
   String _getAlertName(AlertMessage alert) {
