@@ -18,7 +18,7 @@ import 'services/ble_peripheral_service.dart';
 
 void main() {
   // Set up logging
-  // testBleMessage();   
+  // testBleMessage();
   Logger.root.level = Level.ALL;
   Logger.root.onRecord.listen((record) {
     print('${record.level.name}: ${record.time}: ${record.message}');

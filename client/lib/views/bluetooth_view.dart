@@ -22,7 +22,7 @@ class _BluetoothViewState extends State<BluetoothView> {
   late final BleCentralService _centralService;
   late final BlePeripheralService _peripheralService;
 
-  List<String> _receivedMessages = [];
+  final List<String> _receivedMessages = [];
 
   @override
   void initState() {
@@ -87,12 +87,14 @@ class _BluetoothViewState extends State<BluetoothView> {
                       await _peripheralService.stopBroadcast();
                     } else {
                       // Broadcast sample message
-                      final bytes = Uint8List.fromList(utf8.encode('Hello BLE'));
+                      final bytes = Uint8List.fromList(
+                        utf8.encode('Hello BLE'),
+                      );
                       await _peripheralService.broadcastMessage(bytes);
-                      setState(() {
-                        _isAdvertising = !_isAdvertising;
-                      });
                     }
+                    setState(() {
+                      _isAdvertising = !_isAdvertising;
+                    });
                   },
                   child: Text(
                     _isAdvertising ? 'Stop Broadcast' : 'Start Broadcast',
@@ -120,26 +122,25 @@ class _BluetoothViewState extends State<BluetoothView> {
 
           // Received messages list
           Expanded(
-            child: _receivedMessages.isEmpty
-                ? const Center(
-                    child: Text('No messages received'),
-                  )
-                : ListView.builder(
-                    itemCount: _receivedMessages.length,
-                    itemBuilder: (context, index) {
-                      final message = _receivedMessages[index];
-                      return Card(
-                        margin: const EdgeInsets.symmetric(
-                          horizontal: 16.0,
-                          vertical: 8.0,
-                        ),
-                        child: ListTile(
-                          title: Text('Message $index'),
-                          subtitle: Text(message),
-                        ),
-                      );
-                    },
-                  ),
+            child:
+                _receivedMessages.isEmpty
+                    ? const Center(child: Text('No messages received'))
+                    : ListView.builder(
+                      itemCount: _receivedMessages.length,
+                      itemBuilder: (context, index) {
+                        final message = _receivedMessages[index];
+                        return Card(
+                          margin: const EdgeInsets.symmetric(
+                            horizontal: 16.0,
+                            vertical: 8.0,
+                          ),
+                          child: ListTile(
+                            title: Text('Message $index'),
+                            subtitle: Text(message),
+                          ),
+                        );
+                      },
+                    ),
           ),
         ],
       ),
