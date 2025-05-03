@@ -19,6 +19,7 @@ import 'utils/date_utils.dart';
 import 'views/bluetooth_view.dart';
 import 'services/ble_central_service.dart';
 import 'services/ble_peripheral_service.dart';
+import 'providers/bluetooth_state_provider.dart';
 
 void main() async {
   // Set up logging
@@ -33,7 +34,7 @@ void main() async {
 
   // Ensure Flutter is initialized before using platform channels
   WidgetsFlutterBinding.ensureInitialized();
-  
+
   // Request permissions on startup for Android
   if (Platform.isAndroid) {
     await _requestBluetoothPermissions();
@@ -45,19 +46,20 @@ void main() async {
 // Request Bluetooth permissions required for Android 12+
 Future<void> _requestBluetoothPermissions() async {
   // Request all required permissions
-  Map<Permission, PermissionStatus> statuses = await [
-    Permission.bluetooth,
-    Permission.bluetoothScan,
-    Permission.bluetoothConnect,
-    Permission.bluetoothAdvertise,
-    Permission.location,
-  ].request();
-  
+  Map<Permission, PermissionStatus> statuses =
+      await [
+        Permission.bluetooth,
+        Permission.bluetoothScan,
+        Permission.bluetoothConnect,
+        Permission.bluetoothAdvertise,
+        Permission.location,
+      ].request();
+
   // Log the permission statuses
   statuses.forEach((permission, status) {
     print('$permission: $status');
   });
-  
+
   // Try to enable Bluetooth if it's not already on
   try {
     if (!await FlutterBluePlus.isOn) {
@@ -80,6 +82,7 @@ class MyApp extends StatelessWidget {
           dispose: (_, service) => service.dispose(),
         ),
         Provider<BlePeripheralService>(create: (_) => BlePeripheralService()),
+        ChangeNotifierProvider(create: (_) => BluetoothStateProvider()),
       ],
       child: MaterialApp(
         title: 'Vueling Connect',
@@ -165,31 +168,46 @@ class _MyHomePageState extends State<MyHomePage> {
 
   void _initBleCentralListener() {
     // Get the BLE central service from the provider
-    final centralService = Provider.of<BleCentralService>(context, listen: false);
-    
+    final centralService = Provider.of<BleCentralService>(
+      context,
+      listen: false,
+    );
+
     // Subscribe to the BLE central data stream
     _bleCentralSubscription = centralService.dataStream.listen((data) {
       try {
         // Decode the BLE message
         final bleMessage = BleMessage.decode(Uint8List.fromList(data));
-        
+
         // Process the message based on its type
-        if (bleMessage.msgType == MsgType.flightStatus && bleMessage.flightNumber != null) {
+        if (bleMessage.msgType == MsgType.flightStatus &&
+            bleMessage.flightNumber != null) {
           // Convert BLE flight status message to our format
           final flight = {
             'flight_number': bleMessage.flightNumber,
             'flight_status': bleMessage.status.toString().split('.').last,
-            'timestamp': DateTime.fromMillisecondsSinceEpoch(bleMessage.timestamp * 1000).toIso8601String(),
-            'flight_message': _getFlightStatusMessage(bleMessage.status.toString().split('.').last),
+            'timestamp':
+                DateTime.fromMillisecondsSinceEpoch(
+                  bleMessage.timestamp * 1000,
+                ).toIso8601String(),
+            'flight_message': _getFlightStatusMessage(
+              bleMessage.status.toString().split('.').last,
+            ),
             'source': 'bluetooth', // Mark the source as bluetooth
           };
           _updateFlightInfo(flight);
-        } else if (bleMessage.msgType == MsgType.alert && bleMessage.alertMessage != null) {
+        } else if (bleMessage.msgType == MsgType.alert &&
+            bleMessage.alertMessage != null) {
           // Convert BLE alert message to our format
           final alert = {
             'alert_type': bleMessage.alertMessage.toString().split('.').last,
-            'timestamp': DateTime.fromMillisecondsSinceEpoch(bleMessage.timestamp * 1000).toIso8601String(),
-            'message': _getAlertMessage(bleMessage.alertMessage.toString().split('.').last),
+            'timestamp':
+                DateTime.fromMillisecondsSinceEpoch(
+                  bleMessage.timestamp * 1000,
+                ).toIso8601String(),
+            'message': _getAlertMessage(
+              bleMessage.alertMessage.toString().split('.').last,
+            ),
             'source': 'bluetooth', // Mark the source as bluetooth
           };
           _addAlert(alert);
@@ -332,7 +350,9 @@ class _MyHomePageState extends State<MyHomePage> {
           }
         }
 
-        print('Successfully fetched and processed ${messages.length} messages from API');
+        print(
+          'Successfully fetched and processed ${messages.length} messages from API',
+        );
       } else {
         print('Failed to fetch flight info: ${response.statusCode}');
       }
@@ -343,6 +363,17 @@ class _MyHomePageState extends State<MyHomePage> {
 
   // This method is called by the Bluetooth view when source device is toggled
   void _handleSourceDeviceToggled(bool isSourceDevice) {
+    // Get the provider to ensure state is in sync
+    final provider = Provider.of<BluetoothStateProvider>(
+      context,
+      listen: false,
+    );
+
+    // Make sure provider state matches what we received
+    if (provider.isSourceDevice != isSourceDevice) {
+      provider.setSourceDevice(isSourceDevice);
+    }
+
     // Start or stop API polling based on source device status
     if (isSourceDevice) {
       // Start polling the API every 10 seconds
@@ -350,7 +381,7 @@ class _MyHomePageState extends State<MyHomePage> {
       _apiPollingTimer = Timer.periodic(const Duration(seconds: 10), (_) {
         _fetchFlightInfoFromAPI();
       });
-      
+
       // Fetch immediately on toggle
       _fetchFlightInfoFromAPI();
     } else {
@@ -419,17 +450,20 @@ class _MyHomePageState extends State<MyHomePage> {
       'flight_message':
           newFlight['flight_message'] ??
           _getFlightStatusMessage(newFlight['flight_status']),
-      'source': newFlight['source'] ?? 'api', // Default to 'api' if not specified
+      'source':
+          newFlight['source'] ?? 'api', // Default to 'api' if not specified
     };
 
     if (index != -1) {
       // Flight exists, check if it's identical to avoid duplicates
       final existingFlight = _savedFlights[index];
       if (_isIdenticalFlight(existingFlight, updatedFlight)) {
-        print('Rejecting identical flight update for ${updatedFlight['flight_number']}');
+        print(
+          'Rejecting identical flight update for ${updatedFlight['flight_number']}',
+        );
         return;
       }
-      
+
       // Not identical, check timestamp
       try {
         final DateTime existingTimestamp = DateTime.parse(
@@ -470,10 +504,13 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   // Check if two flight objects are identical in their key properties
-  bool _isIdenticalFlight(Map<String, dynamic> flight1, Map<String, dynamic> flight2) {
+  bool _isIdenticalFlight(
+    Map<String, dynamic> flight1,
+    Map<String, dynamic> flight2,
+  ) {
     return flight1['flight_number'] == flight2['flight_number'] &&
-           flight1['flight_status'] == flight2['flight_status'] &&
-           flight1['timestamp'] == flight2['timestamp'];
+        flight1['flight_status'] == flight2['flight_status'] &&
+        flight1['timestamp'] == flight2['timestamp'];
   }
 
   // Save an alert
@@ -493,8 +530,8 @@ class _MyHomePageState extends State<MyHomePage> {
     };
 
     // Check if this alert is a duplicate of an existing one
-    final isDuplicate = _activeAlerts.any((existingAlert) => 
-      _isIdenticalAlert(existingAlert, safeAlert)
+    final isDuplicate = _activeAlerts.any(
+      (existingAlert) => _isIdenticalAlert(existingAlert, safeAlert),
     );
 
     if (isDuplicate) {
@@ -508,10 +545,13 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   // Check if two alert objects are identical in their key properties
-  bool _isIdenticalAlert(Map<String, dynamic> alert1, Map<String, dynamic> alert2) {
+  bool _isIdenticalAlert(
+    Map<String, dynamic> alert1,
+    Map<String, dynamic> alert2,
+  ) {
     return alert1['alert_type'] == alert2['alert_type'] &&
-           alert1['timestamp'] == alert2['timestamp'] &&
-           alert1['message'] == alert2['message'];
+        alert1['timestamp'] == alert2['timestamp'] &&
+        alert1['message'] == alert2['message'];
   }
 
   // Show alert details dialog
@@ -854,13 +894,20 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   void _navigateToBluetoothView() {
+    // Get the current provider state to maintain consistency
+    final bluetoothState = Provider.of<BluetoothStateProvider>(
+      context,
+      listen: false,
+    );
+
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => BluetoothView(
-          savedFlights: _savedFlights,
-          onSourceDeviceToggled: _handleSourceDeviceToggled,
-        ),
+        builder:
+            (context) => BluetoothView(
+              savedFlights: _savedFlights,
+              onSourceDeviceToggled: _handleSourceDeviceToggled,
+            ),
       ),
     );
   }

@@ -10,13 +10,14 @@ import '../utils/string_utils.dart';
 import '../utils/date_utils.dart';
 import '../widgets/message_cards.dart';
 import '../theme.dart';
+import '../providers/bluetooth_state_provider.dart';
 
 class BluetoothView extends StatefulWidget {
   final List<Map<String, dynamic>> savedFlights;
   final Function(bool) onSourceDeviceToggled;
 
   const BluetoothView({
-    super.key, 
+    super.key,
     required this.savedFlights,
     required this.onSourceDeviceToggled,
   });
@@ -26,10 +27,6 @@ class BluetoothView extends StatefulWidget {
 }
 
 class _BluetoothViewState extends State<BluetoothView> {
-  bool _isSourceDevice = false;
-  bool _isScanning = false;
-  bool _isAdvertising = false;
-
   late final BleCentralService _centralService;
   late final BlePeripheralService _peripheralService;
 
@@ -65,10 +62,12 @@ class _BluetoothViewState extends State<BluetoothView> {
 
   // Toggle source device mode
   void _toggleSourceDevice(bool value) {
-    setState(() {
-      _isSourceDevice = value;
-    });
-    
+    final provider = Provider.of<BluetoothStateProvider>(
+      context,
+      listen: false,
+    );
+    provider.setSourceDevice(value);
+
     // Notify the parent component about the change
     widget.onSourceDeviceToggled(value);
   }
@@ -82,17 +81,21 @@ class _BluetoothViewState extends State<BluetoothView> {
     bool hasLocation = await Permission.location.isGranted;
 
     // If any permission is missing, request all of them
-    if (!hasBluetoothScan || !hasBluetoothConnect || !hasBluetoothAdvertise || !hasLocation) {
+    if (!hasBluetoothScan ||
+        !hasBluetoothConnect ||
+        !hasBluetoothAdvertise ||
+        !hasLocation) {
       print('Requesting Bluetooth permissions from Bluetooth view...');
-      
-      Map<Permission, PermissionStatus> statuses = await [
-        Permission.bluetooth,
-        Permission.bluetoothScan,
-        Permission.bluetoothConnect,
-        Permission.bluetoothAdvertise,
-        Permission.location,
-      ].request();
-      
+
+      Map<Permission, PermissionStatus> statuses =
+          await [
+            Permission.bluetooth,
+            Permission.bluetoothScan,
+            Permission.bluetoothConnect,
+            Permission.bluetoothAdvertise,
+            Permission.location,
+          ].request();
+
       // Log the results
       statuses.forEach((permission, status) {
         print('$permission: $status');
@@ -102,6 +105,8 @@ class _BluetoothViewState extends State<BluetoothView> {
 
   @override
   Widget build(BuildContext context) {
+    final bluetoothProvider = Provider.of<BluetoothStateProvider>(context);
+
     return Scaffold(
       appBar: AppBar(title: const Text('Bluetooth Mesh Network')),
       body: Column(
@@ -112,7 +117,7 @@ class _BluetoothViewState extends State<BluetoothView> {
             subtitle: const Text(
               'Enable to act as the original source of flight information',
             ),
-            value: _isSourceDevice,
+            value: bluetoothProvider.isSourceDevice,
             onChanged: _toggleSourceDevice,
           ),
 
@@ -124,23 +129,24 @@ class _BluetoothViewState extends State<BluetoothView> {
               children: [
                 ElevatedButton(
                   onPressed: () async {
-                    if (_isScanning) {
+                    if (bluetoothProvider.isScanning) {
                       await _centralService.stopDiscovery();
+                      bluetoothProvider.setScanning(false);
                     } else {
                       await _centralService.startDiscovery();
+                      bluetoothProvider.setScanning(true);
                     }
-                    setState(() {
-                      _isScanning = !_isScanning;
-                    });
                   },
-                  child: Text(_isScanning ? 'Stop Scan' : 'Start Scan'),
+                  child: Text(
+                    bluetoothProvider.isScanning ? 'Stop Scan' : 'Start Scan',
+                  ),
                 ),
                 ElevatedButton(
                   onPressed: () async {
-                    if (_isAdvertising) {
+                    if (bluetoothProvider.isAdvertising) {
                       await _peripheralService.stopBroadcast();
+                      bluetoothProvider.setAdvertising(false);
                       setState(() {
-                        _isAdvertising = false;
                         _currentBroadcastMessage = null;
                       });
                     } else {
@@ -149,7 +155,9 @@ class _BluetoothViewState extends State<BluetoothView> {
                     }
                   },
                   child: Text(
-                    _isAdvertising ? 'Stop Broadcast' : 'Start Broadcast',
+                    bluetoothProvider.isAdvertising
+                        ? 'Stop Broadcast'
+                        : 'Start Broadcast',
                   ),
                 ),
               ],
@@ -164,16 +172,23 @@ class _BluetoothViewState extends State<BluetoothView> {
               children: [
                 Text('Status:', style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: 8),
-                Text('Scanning: ${_isScanning ? "Active" : "Inactive"}'),
-                Text('Broadcasting: ${_isAdvertising ? "Active" : "Inactive"}'),
-                Text('Role: ${_isSourceDevice ? "Source" : "Relay"}'),
+                Text(
+                  'Scanning: ${bluetoothProvider.isScanning ? "Active" : "Inactive"}',
+                ),
+                Text(
+                  'Broadcasting: ${bluetoothProvider.isAdvertising ? "Active" : "Inactive"}',
+                ),
+                Text(
+                  'Role: ${bluetoothProvider.isSourceDevice ? "Source" : "Relay"}',
+                ),
                 Text('Received Messages: ${_receivedMessages.length}'),
               ],
             ),
           ),
 
           // Current broadcast message
-          if (_isAdvertising && _currentBroadcastMessage != null)
+          if (bluetoothProvider.isAdvertising &&
+              _currentBroadcastMessage != null)
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -308,9 +323,7 @@ class _BluetoothViewState extends State<BluetoothView> {
   void _showFlightSelectionDialog() {
     if (widget.savedFlights.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('No flights available to broadcast'),
-        ),
+        const SnackBar(content: Text('No flights available to broadcast')),
       );
       return;
     }
@@ -336,22 +349,27 @@ class _BluetoothViewState extends State<BluetoothView> {
                     Navigator.pop(context);
                     // Create BLE message from flight
                     // Important: Preserve the original timestamp
-                    final timestamp = DateTime.parse(flight['timestamp']).millisecondsSinceEpoch ~/ 1000;
-                    
+                    final timestamp =
+                        DateTime.parse(
+                          flight['timestamp'],
+                        ).millisecondsSinceEpoch ~/
+                        1000;
+
                     final msg = BleMessage.flightStatus(
                       flightNumber: flight['flight_number'],
                       status: _getFlightStatusEnum(flight['flight_status']),
                       timestamp: timestamp, // Use the original timestamp
                     );
-                    
+
                     setState(() {
                       _currentBroadcastMessage = msg;
                     });
-                    
+
                     await _peripheralService.broadcastMessage(msg.encode());
-                    setState(() {
-                      _isAdvertising = true;
-                    });
+                    Provider.of<BluetoothStateProvider>(
+                      context,
+                      listen: false,
+                    ).setAdvertising(true);
                   },
                 );
               },
@@ -377,9 +395,9 @@ class _BluetoothViewState extends State<BluetoothView> {
                     getAlertIcon(alertType.toString().split('.').last),
                     color: getAlertColor(alertType.toString().split('.').last),
                   ),
-                  title: Text(capitalizeFirstLetter(
-                    alertType.toString().split('.').last,
-                  )),
+                  title: Text(
+                    capitalizeFirstLetter(alertType.toString().split('.').last),
+                  ),
                   onTap: () async {
                     Navigator.pop(context);
                     // Create BLE message with current timestamp
@@ -387,15 +405,16 @@ class _BluetoothViewState extends State<BluetoothView> {
                       alertMessage: alertType,
                       timestamp: DateTime.now().millisecondsSinceEpoch ~/ 1000,
                     );
-                    
+
                     setState(() {
                       _currentBroadcastMessage = msg;
                     });
-                    
+
                     await _peripheralService.broadcastMessage(msg.encode());
-                    setState(() {
-                      _isAdvertising = true;
-                    });
+                    Provider.of<BluetoothStateProvider>(
+                      context,
+                      listen: false,
+                    ).setAdvertising(true);
                   },
                 ),
             ],
@@ -407,7 +426,7 @@ class _BluetoothViewState extends State<BluetoothView> {
 
   FlightStatus _getFlightStatusEnum(String? status) {
     if (status == null) return FlightStatus.scheduled;
-    
+
     switch (status.toLowerCase()) {
       case 'departed':
         return FlightStatus.departed;
