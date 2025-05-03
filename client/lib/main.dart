@@ -1,58 +1,99 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:audioplayers/audioplayers.dart';
+import 'package:http/http.dart' as http;
+import 'package:prueba_app/ble_message.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:logging/logging.dart';
+import 'package:provider/provider.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'theme.dart';
+import 'widgets/message_cards.dart';
+import 'utils/string_utils.dart';
+import 'utils/date_utils.dart';
+import 'views/bluetooth_view.dart';
+import 'services/ble_central_service.dart';
+import 'services/ble_peripheral_service.dart';
 
-void main() {
+void main() async {
+  // Set up logging
+  // testBleMessage();
+  Logger.root.level = Level.ALL;
+  Logger.root.onRecord.listen((record) {
+    print('${record.level.name}: ${record.time}: ${record.message}');
+    if (record.error != null) {
+      print('Error: ${record.error}\nStack trace: ${record.stackTrace}');
+    }
+  });
+
+  // Ensure Flutter is initialized before using platform channels
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  // Request permissions on startup for Android
+  if (Platform.isAndroid) {
+    await _requestBluetoothPermissions();
+  }
+
   runApp(const MyApp());
+}
+
+// Request Bluetooth permissions required for Android 12+
+Future<void> _requestBluetoothPermissions() async {
+  // Request all required permissions
+  Map<Permission, PermissionStatus> statuses = await [
+    Permission.bluetooth,
+    Permission.bluetoothScan,
+    Permission.bluetoothConnect,
+    Permission.bluetoothAdvertise,
+    Permission.location,
+  ].request();
+  
+  // Log the permission statuses
+  statuses.forEach((permission, status) {
+    print('$permission: $status');
+  });
+  
+  // Try to enable Bluetooth if it's not already on
+  try {
+    if (!await FlutterBluePlus.isOn) {
+      await FlutterBluePlus.turnOn();
+    }
+  } catch (e) {
+    print('Error turning on Bluetooth: $e');
+  }
 }
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
-  // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Flutter Demo',
-      theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+    return MultiProvider(
+      providers: [
+        Provider<BleCentralService>(
+          create: (_) => BleCentralService(),
+          dispose: (_, service) => service.dispose(),
+        ),
+        Provider<BlePeripheralService>(create: (_) => BlePeripheralService()),
+      ],
+      child: MaterialApp(
+        title: 'Vueling Connect',
+        theme: getLightTheme(),
+        darkTheme: getDarkTheme(),
+        themeMode: ThemeMode.dark, // Force dark mode
+        home: const MyHomePage(title: 'Vueling Connect'),
       ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
     );
   }
 }
 
 class MyHomePage extends StatefulWidget {
   const MyHomePage({super.key, required this.title});
-
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
   final String title;
 
   @override
@@ -60,14 +101,103 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
   StreamSubscription<BluetoothAdapterState>? _adapterStateSubscription;
+  StreamSubscription<Uint8List>? _bleCentralSubscription;
+  Timer? _apiPollingTimer;
   final AudioPlayer _audioPlayer = AudioPlayer();
+
+  // Flight tracking
+  final TextEditingController _flightNumberController = TextEditingController();
+  Map<String, dynamic>? _flightInfo;
+  bool _isLoading = false;
+  String _errorMessage = '';
+  String _serverAddress = 'localhost';
+  String _serverPort = '8000';
+
+  // Stored flight information
+  List<Map<String, dynamic>> _savedFlights = [];
+
+  // Alerts information
+  final List<Map<String, dynamic>> _activeAlerts = [];
 
   @override
   void initState() {
     super.initState();
     _initBluetooth();
+    _loadSavedFlights();
+    _loadServerSettings();
+    _initBleCentralListener();
+  }
+
+  Future<void> _loadSavedFlights() async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedFlightsJson = prefs.getString('savedFlights');
+
+    if (savedFlightsJson != null) {
+      setState(() {
+        _savedFlights = List<Map<String, dynamic>>.from(
+          (jsonDecode(savedFlightsJson) as List).map(
+            (flight) => Map<String, dynamic>.from(flight as Map),
+          ),
+        );
+      });
+    }
+  }
+
+  Future<void> _loadServerSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _serverAddress = prefs.getString('serverAddress') ?? 'localhost';
+      _serverPort = prefs.getString('serverPort') ?? '8000';
+    });
+  }
+
+  Future<void> _saveFlights() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('savedFlights', jsonEncode(_savedFlights));
+  }
+
+  Future<void> _saveServerSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('serverAddress', _serverAddress);
+    await prefs.setString('serverPort', _serverPort);
+  }
+
+  void _initBleCentralListener() {
+    // Get the BLE central service from the provider
+    final centralService = Provider.of<BleCentralService>(context, listen: false);
+    
+    // Subscribe to the BLE central data stream
+    _bleCentralSubscription = centralService.dataStream.listen((data) {
+      try {
+        // Decode the BLE message
+        final bleMessage = BleMessage.decode(Uint8List.fromList(data));
+        
+        // Process the message based on its type
+        if (bleMessage.msgType == MsgType.flightStatus && bleMessage.flightNumber != null) {
+          // Convert BLE flight status message to our format
+          final flight = {
+            'flight_number': bleMessage.flightNumber,
+            'flight_status': bleMessage.status.toString().split('.').last,
+            'timestamp': DateTime.fromMillisecondsSinceEpoch(bleMessage.timestamp * 1000).toIso8601String(),
+            'flight_message': _getFlightStatusMessage(bleMessage.status.toString().split('.').last),
+            'source': 'bluetooth', // Mark the source as bluetooth
+          };
+          _updateFlightInfo(flight);
+        } else if (bleMessage.msgType == MsgType.alert && bleMessage.alertMessage != null) {
+          // Convert BLE alert message to our format
+          final alert = {
+            'alert_type': bleMessage.alertMessage.toString().split('.').last,
+            'timestamp': DateTime.fromMillisecondsSinceEpoch(bleMessage.timestamp * 1000).toIso8601String(),
+            'message': _getAlertMessage(bleMessage.alertMessage.toString().split('.').last),
+            'source': 'bluetooth', // Mark the source as bluetooth
+          };
+          _addAlert(alert);
+        }
+      } catch (e) {
+        print('Error processing BLE message: $e');
+      }
+    });
   }
 
   Future<void> _initBluetooth() async {
@@ -81,19 +211,19 @@ class _MyHomePageState extends State<MyHomePage> {
     }
 
     // Escucha cambios en el estado del adaptador
-    _adapterStateSubscription = FlutterBluePlus.adapterState.listen((BluetoothAdapterState state) {
+    _adapterStateSubscription = FlutterBluePlus.adapterState.listen((
+      BluetoothAdapterState state,
+    ) {
       print('Bluetooth state: $state');
       if (state == BluetoothAdapterState.on) {
         // Aquí podrías iniciar el escaneo, etc.
-       _playSound('a.mp3');
+        _playSound('a.mp3');
         print("Bluetooth está activado");
       } else {
-       _playSound('b.mp3');
+        _playSound('b.mp3');
         print("Bluetooth desactivado o sin permisos");
       }
     });
-
-    
 
     // En Android, intenta activar Bluetooth automáticamente
     if (!kIsWeb && Platform.isAndroid) {
@@ -109,82 +239,629 @@ class _MyHomePageState extends State<MyHomePage> {
     }
   }
 
-   @override
-  void dispose() {
-    _adapterStateSubscription?.cancel();
-    super.dispose();
+  Future<void> _fetchFlightInfo() async {
+    final flightNumber = _flightNumberController.text.trim();
+
+    setState(() {
+      _isLoading = true;
+      _flightInfo = null;
+      _errorMessage = '';
+    });
+
+    // If a flight number was specified, filter the existing flights
+    if (flightNumber.isNotEmpty) {
+      // Find the requested flight in saved flights
+      final matchingFlight = _savedFlights.firstWhere(
+        (flight) => flight['flight_number'] == flightNumber,
+        orElse: () => <String, dynamic>{},
+      );
+
+      setState(() {
+        _flightInfo = matchingFlight.isEmpty ? null : matchingFlight;
+        if (_flightInfo == null) {
+          _errorMessage = 'Flight not found';
+        }
+        _isLoading = false;
+      });
+    } else {
+      // No flight number specified, just show all flights
+      setState(() {
+        _flightInfo = null;
+        _isLoading = false;
+      });
+    }
   }
 
-  
+  // This method is called periodically when source device is on
+  Future<void> _fetchFlightInfoFromAPI() async {
+    // Use 10.0.2.2 instead of localhost when running on Android emulator
+    String host = _serverAddress;
+    if (!kIsWeb && Platform.isAndroid && host == 'localhost') {
+      // 10.0.2.2 is the special IP for host machine when using Android emulator
+      host = '10.0.2.2';
+    }
 
+    final apiUrl = 'http://$host:$_serverPort/flight-status';
+    print('Connecting to API: $apiUrl');
 
-  void _incrementCounter() {
+    try {
+      final response = await http.get(Uri.parse(apiUrl));
+
+      if (response.statusCode == 200) {
+        final List<dynamic> messages = jsonDecode(response.body);
+
+        // Process messages by type
+        for (var msg in messages) {
+          String msgType = msg['msg_type'];
+
+          if (msgType == 'flightStatus') {
+            // Only process if we have the minimum required fields
+            if (msg['flight_number'] != null) {
+              // Convert to our format
+              final flight = {
+                'flight_number': msg['flight_number'],
+                'flight_status': msg['status'] ?? 'unknown',
+                'timestamp':
+                    DateTime.fromMillisecondsSinceEpoch(
+                      (msg['timestamp'] is int)
+                          ? msg['timestamp'] * 1000
+                          : int.parse(msg['timestamp'].toString()) * 1000,
+                    ).toIso8601String(),
+                'flight_message': _getFlightStatusMessage(msg['status']),
+                'source': 'api', // Mark the source as API
+              };
+              _updateFlightInfo(flight);
+            }
+          } else if (msgType == 'alert') {
+            // Only process if we have the minimum required fields
+            if (msg['alert_type'] != null && msg['timestamp'] != null) {
+              // Process alert
+              final alert = {
+                'alert_type': msg['alert_type'],
+                'timestamp':
+                    DateTime.fromMillisecondsSinceEpoch(
+                      (msg['timestamp'] is int)
+                          ? msg['timestamp'] * 1000
+                          : int.parse(msg['timestamp'].toString()) * 1000,
+                    ).toIso8601String(),
+                'message': _getAlertMessage(msg['alert_type']),
+                'source': 'api', // Mark the source as API
+              };
+              _addAlert(alert);
+            }
+          }
+        }
+
+        print('Successfully fetched and processed ${messages.length} messages from API');
+      } else {
+        print('Failed to fetch flight info: ${response.statusCode}');
+      }
+    } catch (e) {
+      print('Error fetching from API: $e');
+    }
+  }
+
+  // This method is called by the Bluetooth view when source device is toggled
+  void _handleSourceDeviceToggled(bool isSourceDevice) {
+    // Start or stop API polling based on source device status
+    if (isSourceDevice) {
+      // Start polling the API every 10 seconds
+      _apiPollingTimer?.cancel();
+      _apiPollingTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+        _fetchFlightInfoFromAPI();
+      });
+      
+      // Fetch immediately on toggle
+      _fetchFlightInfoFromAPI();
+    } else {
+      // Stop polling when source device is turned off
+      _apiPollingTimer?.cancel();
+      _apiPollingTimer = null;
+    }
+  }
+
+  // Helper to get flight status message
+  String _getFlightStatusMessage(String? status) {
+    if (status == null) return 'Flight status unknown.';
+
+    switch (status) {
+      case 'scheduled':
+        return 'Your flight is scheduled to depart as planned.';
+      case 'departed':
+        return 'Your flight has departed.';
+      case 'arrived':
+        return 'Your flight has arrived at the destination.';
+      case 'delayed':
+        return 'Your flight is delayed. Please check the departure board.';
+      case 'cancelled':
+        return 'Your flight has been cancelled. Please contact Vueling staff.';
+      default:
+        return 'Flight status unknown.';
+    }
+  }
+
+  // Helper to get alert message
+  String _getAlertMessage(String? alertType) {
+    if (alertType == null) return 'Unknown alert.';
+
+    switch (alertType) {
+      case 'medical':
+        return 'Medical emergency alert. If you are a doctor or medical professional, please identify yourself to cabin crew.';
+      case 'evacuation':
+        return 'EMERGENCY! Please prepare for evacuation and follow crew instructions immediately!';
+      case 'fire':
+        return 'EMERGENCY! Fire alert. Please remain calm and follow crew instructions.';
+      case 'aliens':
+        return 'ALERT: Unexpected visitors detected. This is not a drill.';
+      default:
+        return 'Unknown alert.';
+    }
+  }
+
+  // Update existing flight or add new one if it doesn't exist
+  void _updateFlightInfo(Map<String, dynamic> newFlight) {
+    // Validate that we have at least a flight number
+    final flightNumber = newFlight['flight_number'];
+    if (flightNumber == null) {
+      print('Cannot update flight info: Missing flight number');
+      return;
+    }
+
+    final index = _savedFlights.indexWhere(
+      (flight) => flight['flight_number'] == flightNumber,
+    );
+
+    // Make sure all required fields exist with defaults if needed
+    final updatedFlight = {
+      'flight_number': flightNumber,
+      'flight_status': newFlight['flight_status'] ?? 'unknown',
+      'timestamp': newFlight['timestamp'] ?? DateTime.now().toIso8601String(),
+      'flight_message':
+          newFlight['flight_message'] ??
+          _getFlightStatusMessage(newFlight['flight_status']),
+      'source': newFlight['source'] ?? 'api', // Default to 'api' if not specified
+    };
+
+    if (index != -1) {
+      // Flight exists, check if it's identical to avoid duplicates
+      final existingFlight = _savedFlights[index];
+      if (_isIdenticalFlight(existingFlight, updatedFlight)) {
+        print('Rejecting identical flight update for ${updatedFlight['flight_number']}');
+        return;
+      }
+      
+      // Not identical, check timestamp
+      try {
+        final DateTime existingTimestamp = DateTime.parse(
+          _savedFlights[index]['timestamp'] ?? '',
+        );
+        final DateTime newTimestamp = DateTime.parse(
+          updatedFlight['timestamp'],
+        );
+
+        if (newTimestamp.isAfter(existingTimestamp)) {
+          setState(() {
+            _savedFlights[index] = updatedFlight;
+            _flightInfo = updatedFlight;
+          });
+        } else {
+          // Use existing flight info if it's newer
+          setState(() {
+            _flightInfo = _savedFlights[index];
+          });
+        }
+      } catch (e) {
+        // If there's an issue with timestamp parsing, just update with new info
+        setState(() {
+          _savedFlights[index] = updatedFlight;
+          _flightInfo = updatedFlight;
+        });
+        print('Error parsing timestamps: $e');
+      }
+    } else {
+      // New flight, add it
+      setState(() {
+        _savedFlights.add(updatedFlight);
+        _flightInfo = updatedFlight;
+      });
+    }
+
+    _saveFlights();
+  }
+
+  // Check if two flight objects are identical in their key properties
+  bool _isIdenticalFlight(Map<String, dynamic> flight1, Map<String, dynamic> flight2) {
+    return flight1['flight_number'] == flight2['flight_number'] &&
+           flight1['flight_status'] == flight2['flight_status'] &&
+           flight1['timestamp'] == flight2['timestamp'];
+  }
+
+  // Save an alert
+  void _addAlert(Map<String, dynamic> alert) {
+    // Make sure we have the minimum required fields
+    if (alert['alert_type'] == null) {
+      print('Cannot add alert: Missing alert type');
+      return;
+    }
+
+    // Ensure all required fields have values
+    final safeAlert = {
+      'alert_type': alert['alert_type'],
+      'timestamp': alert['timestamp'] ?? DateTime.now().toIso8601String(),
+      'message': alert['message'] ?? _getAlertMessage(alert['alert_type']),
+      'source': alert['source'] ?? 'api', // Default to 'api' if not specified
+    };
+
+    // Check if this alert is a duplicate of an existing one
+    final isDuplicate = _activeAlerts.any((existingAlert) => 
+      _isIdenticalAlert(existingAlert, safeAlert)
+    );
+
+    if (isDuplicate) {
+      print('Rejecting identical alert of type ${safeAlert['alert_type']}');
+      return;
+    }
+
     setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
-      FlutterBluePlus.setLogLevel(LogLevel.verbose, color:false);
-
-      
-
-
-      
+      _activeAlerts.add(safeAlert);
     });
+  }
+
+  // Check if two alert objects are identical in their key properties
+  bool _isIdenticalAlert(Map<String, dynamic> alert1, Map<String, dynamic> alert2) {
+    return alert1['alert_type'] == alert2['alert_type'] &&
+           alert1['timestamp'] == alert2['timestamp'] &&
+           alert1['message'] == alert2['message'];
+  }
+
+  // Show alert details dialog
+  void _showAlertDialog(Map<String, dynamic> alert) {
+    showDialog(
+      context: context,
+      builder:
+          (context) => AlertDialog(
+            title: Row(
+              children: [
+                Icon(
+                  getAlertIcon(alert['alert_type']),
+                  color: getAlertColor(alert['alert_type']),
+                ),
+                const SizedBox(width: 8),
+                const Text('Alert'),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  alert['message'] ?? 'No message available',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Time: ${formatDateTime(alert['timestamp'])}',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Close'),
+              ),
+            ],
+          ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _adapterStateSubscription?.cancel();
+    _bleCentralSubscription?.cancel();
+    _apiPollingTimer?.cancel();
+    _flightNumberController.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
     return Scaffold(
       appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
+        backgroundColor: Theme.of(context).colorScheme.primary,
+        foregroundColor: Colors.black,
         title: Text(widget.title),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.settings),
+            onPressed: _showServerSettings,
+            tooltip: 'Server Settings',
+          ),
+          IconButton(
+            icon: const Icon(Icons.list),
+            onPressed: _showSavedFlights,
+            tooltip: 'Saved Flights',
+          ),
+          IconButton(
+            icon: const Icon(Icons.bluetooth),
+            onPressed: _navigateToBluetoothView,
+            tooltip: 'Bluetooth Mesh',
+          ),
+        ],
       ),
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
         child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
-          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            const Text('You have pushed the button this many times:'),
+            // Alert section if there are active alerts
+            if (_activeAlerts.isNotEmpty) ...[
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Active Alerts',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  TextButton(
+                    onPressed: () => _showAlertsDialog(),
+                    child: const Text('View All'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              AlertCard(
+                alert: _activeAlerts.last,
+                onTap: () => _showAlertDialog(_activeAlerts.last),
+              ),
+              const SizedBox(height: 16),
+            ],
+
+            // Flight tracker section
             Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
+              'Flight Tracker',
+              style: Theme.of(context).textTheme.headlineSmall,
             ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _flightNumberController,
+                    decoration: const InputDecoration(
+                      labelText: 'Enter Flight Number (e.g., VY2375)',
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                ElevatedButton(
+                  onPressed: _fetchFlightInfo,
+                  child: const Text('Filter Flights'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Center(
+              child: TextButton.icon(
+                onPressed: () {
+                  _flightNumberController.clear();
+                  _fetchFlightInfo();
+                },
+                icon: const Icon(Icons.list),
+                label: const Text('View All Flights'),
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // Flight info display
+            if (_isLoading)
+              const Center(child: CircularProgressIndicator())
+            else if (_errorMessage.isNotEmpty)
+              SelectableText(_errorMessage, style: TextStyle(color: Colors.red))
+            else if (_flightInfo != null)
+              FlightCard(flight: _flightInfo!, isExpanded: true)
+            else if (_savedFlights.isNotEmpty)
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'All Flights',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 8),
+                    Expanded(
+                      child: ListView.builder(
+                        itemCount: _savedFlights.length,
+                        itemBuilder: (context, index) {
+                          final flight = _savedFlights[index];
+                          return FlightCard(
+                            flight: flight,
+                            onTap: () {
+                              setState(() {
+                                _flightNumberController.text =
+                                    flight['flight_number'];
+                                _flightInfo = flight;
+                              });
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              )
+            else
+              Center(
+                child: Text(
+                  'No flights available. Try connecting to the server or checking a specific flight.',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodyLarge,
+                ),
+              ),
           ],
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
-      ), // This trailing comma makes auto-formatting nicer for build methods.
+    );
+  }
+
+  void _showAlertsDialog() {
+    showDialog(
+      context: context,
+      builder:
+          (context) => AlertDialog(
+            title: const Text('Active Alerts'),
+            content: SizedBox(
+              width: double.maxFinite,
+              height: 300,
+              child:
+                  _activeAlerts.isEmpty
+                      ? const Center(child: Text('No active alerts'))
+                      : ListView.builder(
+                        itemCount: _activeAlerts.length,
+                        itemBuilder: (context, index) {
+                          return AlertCard(
+                            alert: _activeAlerts[index],
+                            onTap: () {
+                              Navigator.pop(context);
+                              _showAlertDialog(_activeAlerts[index]);
+                            },
+                          );
+                        },
+                      ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Close'),
+              ),
+              if (_activeAlerts.isNotEmpty)
+                TextButton(
+                  onPressed: () {
+                    setState(() {
+                      _activeAlerts.clear();
+                    });
+                    Navigator.pop(context);
+                  },
+                  child: const Text('Clear All'),
+                ),
+            ],
+          ),
+    );
+  }
+
+  void _showServerSettings() {
+    final addressController = TextEditingController(text: _serverAddress);
+    final portController = TextEditingController(text: _serverPort);
+
+    showDialog(
+      context: context,
+      builder:
+          (context) => AlertDialog(
+            title: const Text('Server Settings'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: addressController,
+                  decoration: const InputDecoration(
+                    labelText: 'Server Address',
+                    hintText: 'localhost or IP address',
+                  ),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: portController,
+                  decoration: const InputDecoration(
+                    labelText: 'Server Port',
+                    hintText: '8000',
+                  ),
+                  keyboardType: TextInputType.number,
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton(
+                onPressed: () {
+                  setState(() {
+                    _serverAddress = addressController.text;
+                    _serverPort = portController.text;
+                  });
+                  // Save to shared preferences
+                  _saveServerSettings();
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        'Server set to: $_serverAddress:$_serverPort',
+                      ),
+                    ),
+                  );
+                },
+                child: const Text('Save'),
+              ),
+            ],
+          ),
+    );
+  }
+
+  void _showSavedFlights() {
+    showDialog(
+      context: context,
+      builder:
+          (context) => AlertDialog(
+            title: const Text('Saved Flights'),
+            content: SizedBox(
+              width: double.maxFinite,
+              child:
+                  _savedFlights.isEmpty
+                      ? const Text('No saved flights')
+                      : ListView.builder(
+                        shrinkWrap: true,
+                        itemCount: _savedFlights.length,
+                        itemBuilder: (context, index) {
+                          final flight = _savedFlights[index];
+                          return ListTile(
+                            title: Text('Flight ${flight['flight_number']}'),
+                            subtitle: Text(
+                              'Status: ${capitalizeFirstLetter(flight['flight_status'])}\n'
+                              'Last Updated: ${formatDateTime(flight['timestamp'])}',
+                            ),
+                            onTap: () {
+                              _flightNumberController.text =
+                                  flight['flight_number'];
+                              setState(() {
+                                _flightInfo = flight;
+                              });
+                              Navigator.pop(context);
+                            },
+                          );
+                        },
+                      ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Close'),
+              ),
+            ],
+          ),
+    );
+  }
+
+  void _navigateToBluetoothView() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => BluetoothView(
+          savedFlights: _savedFlights,
+          onSourceDeviceToggled: _handleSourceDeviceToggled,
+        ),
+      ),
     );
   }
 }
