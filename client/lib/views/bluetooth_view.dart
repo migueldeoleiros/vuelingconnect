@@ -9,8 +9,6 @@ import '../services/ble_peripheral_service.dart';
 import '../services/message_store.dart';
 import '../ble_message.dart';
 import '../utils/string_utils.dart';
-import '../utils/date_utils.dart';
-import '../widgets/message_cards.dart';
 import '../theme.dart';
 import '../providers/bluetooth_state_provider.dart';
 
@@ -38,10 +36,9 @@ class _BluetoothViewState extends State<BluetoothView> {
 
   final List<BleMessage> _receivedMessages = [];
   final List<Map<String, dynamic>> _apiMessages = [];
-  BleMessage? _currentBroadcastMessage;
-  
+
   // Stream controller for API messages
-  final StreamController<Map<String, dynamic>> _apiMessageController = 
+  final StreamController<Map<String, dynamic>> _apiMessageController =
       StreamController<Map<String, dynamic>>.broadcast();
 
   @override
@@ -52,10 +49,7 @@ class _BluetoothViewState extends State<BluetoothView> {
       context,
       listen: false,
     );
-    _messageStore = Provider.of<MessageStore>(
-      context,
-      listen: false,
-    );
+    _messageStore = Provider.of<MessageStore>(context, listen: false);
 
     // Check permissions before initializing Bluetooth
     if (Platform.isAndroid) {
@@ -69,7 +63,7 @@ class _BluetoothViewState extends State<BluetoothView> {
         setState(() {
           // Add to the beginning of the list for newest first
           _receivedMessages.insert(0, msg);
-          
+
           // Keep the list size manageable
           if (_receivedMessages.length > 50) {
             _receivedMessages.removeLast();
@@ -80,19 +74,19 @@ class _BluetoothViewState extends State<BluetoothView> {
       }
     });
   }
-  
+
   // Add an API message to the stream
   void addApiMessage(Map<String, dynamic> message) {
     _apiMessageController.add(message);
-    
+
     // Add to the beginning of the list for newest first
     _apiMessages.insert(0, message);
-    
+
     // Limit the number of stored API messages
     if (_apiMessages.length > 50) {
       _apiMessages.removeLast();
     }
-    
+
     // Force a UI update
     setState(() {});
   }
@@ -157,47 +151,57 @@ class _BluetoothViewState extends State<BluetoothView> {
             value: bluetoothProvider.isSourceDevice,
             onChanged: _toggleSourceDevice,
           ),
-          
+
           // Control buttons
           Padding(
             padding: const EdgeInsets.all(16.0),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
-                ElevatedButton(
-                  onPressed: () async {
-                    if (bluetoothProvider.isScanning) {
-                      await _centralService.stopDiscovery();
-                      bluetoothProvider.setScanning(false);
-                    } else {
-                      await _centralService.startDiscovery();
-                      bluetoothProvider.setScanning(true);
-                    }
-                  },
-                  child: Text(
-                    bluetoothProvider.isScanning ? 'Stop Scan' : 'Start Scan',
-                  ),
+                Column(
+                  children: [
+                    ElevatedButton(
+                      onPressed: () async {
+                        if (bluetoothProvider.isScanning) {
+                          await _centralService.stopDiscovery();
+                          bluetoothProvider.setScanning(false);
+                        } else {
+                          await _centralService.startDiscovery();
+                          bluetoothProvider.setScanning(true);
+                        }
+                      },
+                      child: Text(
+                        bluetoothProvider.isScanning
+                            ? 'Stop Scan'
+                            : 'Start Scan',
+                      ),
+                    ),
+                    ElevatedButton(
+                      onPressed: () async {
+                        if (bluetoothProvider.isAdvertising) {
+                          await _peripheralService.stopBroadcast();
+                          bluetoothProvider.setAdvertising(false);
+                          _messageStore.stopAutoRelay();
+                          bluetoothProvider.setAutoRelayEnabled(false);
+                          setState(() {});
+                        } else {
+                          // Start auto-relay
+                          _startAutoRelay();
+                        }
+                      },
+                      child: Text(
+                        bluetoothProvider.isAdvertising
+                            ? 'Stop Broadcast'
+                            : 'Start Broadcast',
+                      ),
+                    ),
+                  ],
                 ),
                 ElevatedButton(
-                  onPressed: () async {
-                    if (bluetoothProvider.isAdvertising) {
-                      await _peripheralService.stopBroadcast();
-                      bluetoothProvider.setAdvertising(false);
-                      _messageStore.stopAutoRelay();
-                      bluetoothProvider.setAutoRelayEnabled(false);
-                      setState(() {
-                        _currentBroadcastMessage = null;
-                      });
-                    } else {
-                      // Select what to broadcast
-                      _showBroadcastOptionsDialog();
-                    }
+                  onPressed: () {
+                    _showAlertSelectionDialog();
                   },
-                  child: Text(
-                    bluetoothProvider.isAdvertising
-                        ? 'Stop Broadcast'
-                        : 'Start Broadcast',
-                  ),
+                  child: const Text('Send Alert'),
                 ),
               ],
             ),
@@ -252,7 +256,9 @@ class _BluetoothViewState extends State<BluetoothView> {
                   Container(
                     height: 120,
                     decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.3),
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.surfaceContainerHighest.withOpacity(0.3),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: StreamBuilder<String>(
@@ -261,7 +267,7 @@ class _BluetoothViewState extends State<BluetoothView> {
                       builder: (context, snapshot) {
                         // Get the initial logs
                         final logs = _messageStore.recentBroadcastLogs;
-                        
+
                         return ListView.builder(
                           padding: const EdgeInsets.all(8.0),
                           itemCount: logs.length,
@@ -269,7 +275,9 @@ class _BluetoothViewState extends State<BluetoothView> {
                             // Logs are already in newest-first order
                             final log = logs[index];
                             return Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 2.0),
+                              padding: const EdgeInsets.symmetric(
+                                vertical: 2.0,
+                              ),
                               child: Text(
                                 log,
                                 style: Theme.of(context).textTheme.bodySmall,
@@ -284,11 +292,9 @@ class _BluetoothViewState extends State<BluetoothView> {
               ),
             ),
 
-          // Current broadcast message
-          if (bluetoothProvider.isAdvertising &&
-              _currentBroadcastMessage != null &&
-              !bluetoothProvider.isAutoRelayEnabled)
-            Column(
+          // Received messages list
+          Expanded(
+            child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Padding(
@@ -296,58 +302,6 @@ class _BluetoothViewState extends State<BluetoothView> {
                     horizontal: 16.0,
                     vertical: 8.0,
                   ),
-                  child: Text(
-                    'Currently Broadcasting:',
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                  child:
-                      _currentBroadcastMessage!.msgType == MsgType.flightStatus
-                          ? FlightCard(
-                            flight: {
-                              'flight_number':
-                                  _currentBroadcastMessage!.flightNumber,
-                              'flight_status':
-                                  _currentBroadcastMessage!.status
-                                      .toString()
-                                      .split('.')
-                                      .last,
-                              'flight_message':
-                                  'This flight information is being broadcast',
-                              'timestamp':
-                                  DateTime.fromMillisecondsSinceEpoch(
-                                    _currentBroadcastMessage!.timestamp * 1000,
-                                  ).toIso8601String(),
-                            },
-                            isExpanded: true,
-                          )
-                          : AlertCard(
-                            alert: {
-                              'alert_type':
-                                  _currentBroadcastMessage!.alertMessage
-                                      .toString()
-                                      .split('.')
-                                      .last,
-                              'message': 'This alert is being broadcast',
-                              'timestamp':
-                                  DateTime.fromMillisecondsSinceEpoch(
-                                    _currentBroadcastMessage!.timestamp * 1000,
-                                  ).toIso8601String(),
-                            },
-                          ),
-                ),
-              ],
-            ),
-
-          // Received messages list
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
                   child: Text(
                     'Received Messages:',
                     style: Theme.of(context).textTheme.titleMedium,
@@ -359,23 +313,28 @@ class _BluetoothViewState extends State<BluetoothView> {
                     builder: (context, snapshot) {
                       // Combine BLE and API messages
                       final List<Widget> messageWidgets = [];
-                      
+
                       // Add BLE messages
                       for (final message in _receivedMessages) {
                         final timestamp = DateTime.fromMillisecondsSinceEpoch(
                           message.timestamp * 1000,
                         ).toIso8601String().substring(11, 19); // HH:MM:SS
-                        
+
                         String logText;
                         if (message.msgType == MsgType.flightStatus) {
-                          logText = '[$timestamp] BLE: Flight ${message.flightNumber} (${message.status.toString().split('.').last}) - Hop: ${message.hopCount}';
+                          logText =
+                              '[$timestamp] BLE: Flight ${message.flightNumber} (${message.status.toString().split('.').last}) - Hop: ${message.hopCount}';
                         } else {
-                          logText = '[$timestamp] BLE: Alert: ${message.alertMessage.toString().split('.').last} - Hop: ${message.hopCount}';
+                          logText =
+                              '[$timestamp] BLE: Alert: ${message.alertMessage.toString().split('.').last} - Hop: ${message.hopCount}';
                         }
-                        
+
                         messageWidgets.add(
                           Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 2.0, horizontal: 16.0),
+                            padding: const EdgeInsets.symmetric(
+                              vertical: 2.0,
+                              horizontal: 16.0,
+                            ),
                             child: Text(
                               logText,
                               style: Theme.of(context).textTheme.bodySmall,
@@ -383,23 +342,28 @@ class _BluetoothViewState extends State<BluetoothView> {
                           ),
                         );
                       }
-                      
+
                       // Add API messages
                       for (final message in _apiMessages) {
                         final timestamp = DateTime.parse(
                           message['timestamp'],
                         ).toIso8601String().substring(11, 19); // HH:MM:SS
-                        
+
                         String logText;
                         if (message['msg_type'] == 'flight') {
-                          logText = '[$timestamp] API: Flight ${message['flight_number']} (${message['flight_status']})';
+                          logText =
+                              '[$timestamp] API: Flight ${message['flight_number']} (${message['flight_status']})';
                         } else {
-                          logText = '[$timestamp] API: Alert: ${message['alert_type']}';
+                          logText =
+                              '[$timestamp] API: Alert: ${message['alert_type']}';
                         }
-                        
+
                         messageWidgets.add(
                           Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 2.0, horizontal: 16.0),
+                            padding: const EdgeInsets.symmetric(
+                              vertical: 2.0,
+                              horizontal: 16.0,
+                            ),
                             child: Text(
                               logText,
                               style: Theme.of(context).textTheme.bodySmall,
@@ -407,16 +371,16 @@ class _BluetoothViewState extends State<BluetoothView> {
                           ),
                         );
                       }
-                      
+
                       // If no messages, show a placeholder
                       if (messageWidgets.isEmpty) {
-                        return const Center(child: Text('No messages received'));
+                        return const Center(
+                          child: Text('No messages received'),
+                        );
                       }
-                      
+
                       // No need to sort since we're already inserting newest messages at the beginning
-                      return ListView(
-                        children: messageWidgets,
-                      );
+                      return ListView(children: messageWidgets);
                     },
                   ),
                 ),
@@ -428,127 +392,29 @@ class _BluetoothViewState extends State<BluetoothView> {
     );
   }
 
-  void _showBroadcastOptionsDialog() {
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Select Broadcast Type'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                leading: const Icon(Icons.flight),
-                title: const Text('Flight Status'),
-                onTap: () {
-                  Navigator.pop(context);
-                  _showFlightSelectionDialog();
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.warning),
-                title: const Text('Alert'),
-                onTap: () {
-                  Navigator.pop(context);
-                  _showAlertSelectionDialog();
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.sync),
-                title: const Text('Auto-Relay All Messages'),
-                subtitle: const Text('Continuously relay all received messages'),
-                onTap: () {
-                  Navigator.pop(context);
-                  _startAutoRelay();
-                },
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-  
   // Start auto-relay of all messages
   void _startAutoRelay() async {
     final provider = Provider.of<BluetoothStateProvider>(
-      context, 
+      context,
       listen: false,
     );
-    
+
     // Start the message store auto-relay
     _messageStore.startAutoRelay();
-    
+
     // Update provider state
     provider.setAutoRelayEnabled(true);
     provider.setAdvertising(true);
-    
+
     // Show a snackbar to confirm
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text('Auto-relay mode activated. Broadcasting all messages.', style: TextStyle(color: Colors.white)),
+        content: Text(
+          'Auto-relay mode activated. Broadcasting all messages.',
+          style: TextStyle(color: Colors.white),
+        ),
         duration: Duration(seconds: 3),
       ),
-    );
-  }
-
-  void _showFlightSelectionDialog() {
-    if (widget.savedFlights.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No flights available to broadcast')),
-      );
-      return;
-    }
-
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Select Flight to Broadcast'),
-          content: SizedBox(
-            width: double.maxFinite,
-            child: ListView.builder(
-              shrinkWrap: true,
-              itemCount: widget.savedFlights.length,
-              itemBuilder: (context, index) {
-                final flight = widget.savedFlights[index];
-                return ListTile(
-                  title: Text('Flight ${flight['flight_number']}'),
-                  subtitle: Text(
-                    '${flight['flight_status']} - ${formatDateTime(flight['timestamp'])}',
-                  ),
-                  onTap: () async {
-                    Navigator.pop(context);
-                    // Create BLE message from flight
-                    // Important: Preserve the original timestamp
-                    final timestamp =
-                        DateTime.parse(
-                          flight['timestamp'],
-                        ).millisecondsSinceEpoch ~/
-                        1000;
-
-                    final msg = BleMessage.flightStatus(
-                      flightNumber: flight['flight_number'],
-                      status: _getFlightStatusEnum(flight['flight_status']),
-                      timestamp: timestamp, // Use the original timestamp
-                    );
-
-                    setState(() {
-                      _currentBroadcastMessage = msg;
-                    });
-
-                    await _peripheralService.broadcastMessage(msg.encode());
-                    Provider.of<BluetoothStateProvider>(
-                      context,
-                      listen: false,
-                    ).setAdvertising(true);
-                  },
-                );
-              },
-            ),
-          ),
-        );
-      },
     );
   }
 
@@ -557,7 +423,7 @@ class _BluetoothViewState extends State<BluetoothView> {
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: const Text('Select Alert Type'),
+          title: const Text('Send Alert'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -578,15 +444,18 @@ class _BluetoothViewState extends State<BluetoothView> {
                       timestamp: DateTime.now().millisecondsSinceEpoch ~/ 1000,
                     );
 
-                    setState(() {
-                      _currentBroadcastMessage = msg;
-                    });
-
+                    // Just broadcast this single message without changing the overall broadcast state
                     await _peripheralService.broadcastMessage(msg.encode());
-                    Provider.of<BluetoothStateProvider>(
-                      context,
-                      listen: false,
-                    ).setAdvertising(true);
+
+                    // Show a confirmation message
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          'Alert sent: ${alertType.toString().split('.').last}',
+                        ),
+                        duration: const Duration(seconds: 2),
+                      ),
+                    );
                   },
                 ),
             ],
@@ -594,24 +463,6 @@ class _BluetoothViewState extends State<BluetoothView> {
         );
       },
     );
-  }
-
-  FlightStatus _getFlightStatusEnum(String? status) {
-    if (status == null) return FlightStatus.scheduled;
-
-    switch (status.toLowerCase()) {
-      case 'departed':
-        return FlightStatus.departed;
-      case 'arrived':
-        return FlightStatus.arrived;
-      case 'delayed':
-        return FlightStatus.delayed;
-      case 'cancelled':
-        return FlightStatus.cancelled;
-      case 'scheduled':
-      default:
-        return FlightStatus.scheduled;
-    }
   }
 
   @override
