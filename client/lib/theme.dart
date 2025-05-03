@@ -62,16 +62,16 @@ ThemeData getDarkTheme() {
 
 // Status colors optimized for dark mode
 Color getStatusColor(String status) {
-  switch (status) {
-    case 'Scheduled':
+  switch (status.toLowerCase()) {
+    case 'scheduled':
       return Colors.blue[300]!;
-    case 'Departed':
+    case 'departed':
       return Colors.green[300]!;
-    case 'Arrived':
+    case 'arrived':
       return Colors.purple[300]!;
-    case 'Delayed':
+    case 'delayed':
       return Colors.orange[300]!;
-    case 'Cancelled':
+    case 'cancelled':
       return Colors.red[300]!;
     default:
       return Colors.grey[300]!;

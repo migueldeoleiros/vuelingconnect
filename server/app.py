@@ -23,12 +23,11 @@ class AlertType(Enum):
     fire = 3
 
 class BleMessage:
-    def __init__(self, msg_type, flight_number=None, status=None, alert_type=None, message=None, timestamp=None):
+    def __init__(self, msg_type, flight_number=None, status=None, alert_type=None, timestamp=None):
         self.msg_type = msg_type
         self.flight_number = flight_number
         self.status = status
         self.alert_type = alert_type
-        self.message = message
         self.timestamp = timestamp or int(time.time())
 
     @classmethod
@@ -36,25 +35,10 @@ class BleMessage:
         return cls(MsgType.flightStatus, flight_number=flight_number, status=status, timestamp=timestamp)
 
     @classmethod
-    def alert(cls, alert_type, message, timestamp=None):
-        return cls(MsgType.alert, alert_type=alert_type, message=message, timestamp=timestamp)
+    def alert(cls, alert_type, timestamp=None):
+        return cls(MsgType.alert, alert_type=alert_type, timestamp=timestamp)
 
 flight_numbers = [f"VY{i:04d}" for i in range(2375, 2389)]
-
-status_message_map = {
-    FlightStatus.scheduled: "Flight scheduled to depart on time.",
-    FlightStatus.departed: "Flight has successfully departed.",
-    FlightStatus.arrived: "Flight has landed successfully.",
-    FlightStatus.delayed: "Flight delayed due to weather conditions.",
-    FlightStatus.cancelled: "Flight cancelled due to technical issues.",
-}
-
-alert_message_map = {
-    AlertType.medical: "Medical emergency on board. Please remain seated.",
-    AlertType.evacuation: "Emergency evacuation required. Follow crew instructions.",
-    AlertType.aliens: "Unidentified flying objects spotted. Stay calm.",
-    AlertType.fire: "Fire detected. Prepare for emergency procedures.",
-}
 
 def generate_random_flight_info():
     status = random.choice(list(FlightStatus))
@@ -65,10 +49,7 @@ def generate_random_flight_info():
 
 def generate_random_alert():
     alert_type = random.choice(list(AlertType))
-    return BleMessage.alert(
-        alert_type=alert_type,
-        message=alert_message_map[alert_type]
-    )
+    return BleMessage.alert(alert_type=alert_type)
 
 @app.get("/flight-status")
 async def get_flight_status():
