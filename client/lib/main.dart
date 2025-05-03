@@ -1,29 +1,30 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:convert';
+import 'dart:io';
 
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
-import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:http/http.dart' as http;
-import 'package:prueba_app/ble_message.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:logging/logging.dart';
-import 'package:provider/provider.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'theme.dart';
-import 'widgets/message_cards.dart';
-import 'utils/date_utils.dart';
-import 'utils/string_utils.dart';
-import 'views/bluetooth_view.dart';
+import 'package:provider/provider.dart';
+import 'package:prueba_app/ble_message.dart';
+import 'package:prueba_app/views/points_view.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import 'providers/bluetooth_state_provider.dart';
 import 'services/ble_central_service.dart';
 import 'services/ble_peripheral_service.dart';
 import 'services/message_store.dart';
-import 'providers/bluetooth_state_provider.dart';
-
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'theme.dart';
+import 'utils/date_utils.dart';
+import 'utils/string_utils.dart';
+import 'views/bluetooth_view.dart';
+import 'widgets/message_cards.dart';
 
 final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
     FlutterLocalNotificationsPlugin();
@@ -186,6 +187,36 @@ class _MyHomePageState extends State<MyHomePage> {
   @override
   void initState() {
     super.initState();
+      _loadPoints();
+
+     _pointTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
+        if (mounted) {
+          setState(() {
+            _points += 10;
+            _isScaled = true;
+            _showFloatingPlus = true;
+          });
+
+          _savePoints();
+
+          Future.delayed(const Duration(milliseconds: 300), () {
+            if (mounted) {
+              setState(() {
+                _isScaled = false;
+              });
+            }
+          });
+
+          Future.delayed(const Duration(milliseconds: 800), () {
+            if (mounted) {
+              setState(() {
+                _showFloatingPlus = false;
+              });
+            }
+          });
+        }
+      });
+
     _initBluetooth();
     _loadSavedFlights();
     _loadServerSettings();
@@ -826,17 +857,35 @@ class _MyHomePageState extends State<MyHomePage> {
     );
   }
 
+  Future<void> _loadPoints() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _points = prefs.getInt('points') ?? 0;
+    });
+  }
+
+  Future<void> _savePoints() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('points', _points);
+  }
+
   @override
   void dispose() {
     _adapterStateSubscription?.cancel();
     _bleCentralSubscription?.cancel();
     _apiPollingTimer?.cancel();
     _flightNumberController.dispose();
+    _pointTimer.cancel();
     super.dispose();
   }
-
+  int _points = 0;
+  bool _isScaled = false;
+  bool _showFloatingPlus = false;
+  late Timer _pointTimer;
+  
   @override
   Widget build(BuildContext context) {
+
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Theme.of(context).colorScheme.primary,
@@ -975,9 +1024,63 @@ class _MyHomePageState extends State<MyHomePage> {
           ],
         ),
       ),
+      bottomNavigationBar: _bottomNavigationBar(),
     );
   }
 
+  Widget _bottomNavigationBar() {
+      return SafeArea(
+      child: Container(
+        height: 64,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
+            Text(
+              '$_points pts',
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(width: 12),
+            Stack(
+              alignment: Alignment.center,
+              clipBehavior: Clip.none,
+              children: [
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    shape: const CircleBorder(),
+                    backgroundColor: Colors.black,
+                    padding: const EdgeInsets.all(0),
+                  ),
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (context) => const PointsView()),
+                    );
+                  },
+                  child: AnimatedScale(
+                    scale: _isScaled ? 1.25 : 1.0,
+                    duration: const Duration(milliseconds: 450),
+                    child: const Icon(
+                      Icons.inventory,
+                      size: 64,
+                      color: Color.fromARGB(255, 255, 255, 0),
+                    ),
+                  ),
+                ),
+
+                // +10 flotante animado
+                if (_showFloatingPlus)
+                  const Positioned(
+                    top: -30,
+                    child: _FloatingPlus(),
+                  ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
   void _showAlertsDialog() {
     showDialog(
       context: context,
@@ -1092,6 +1195,73 @@ class _MyHomePageState extends State<MyHomePage> {
               onSourceDeviceToggled: _handleSourceDeviceToggled,
               key: _bluetoothViewKey,
             ),
+      ),
+    );
+  }
+  
+
+}
+
+class _FloatingPlus extends StatefulWidget {
+  const _FloatingPlus({Key? key}) : super(key: key);
+
+  @override
+  State<_FloatingPlus> createState() => _FloatingPlusState();
+}
+
+class _FloatingPlusState extends State<_FloatingPlus>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  late final Animation<double> _position;
+  late final Animation<double> _opacity;
+
+  @override
+  void initState() {
+    super.initState();
+
+    
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    );
+
+    _position = Tween<double>(begin: 0, end: -40).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeOut),
+    );
+
+    _opacity = Tween<double>(begin: 1.0, end: 0.0).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeOut),
+    );
+
+    _controller.forward();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        return Opacity(
+          opacity: _opacity.value,
+          child: Transform.translate(
+            offset: Offset(0, _position.value),
+            child: child,
+          ),
+        );
+      },
+      child: const Text(
+        '+10',
+        style: TextStyle(
+          fontSize: 30,
+          color: Colors.yellow,
+          fontWeight: FontWeight.bold,
+        ),
       ),
     );
   }
