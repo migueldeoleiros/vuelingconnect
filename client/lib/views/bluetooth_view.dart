@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:permission_handler/permission_handler.dart';
 import '../services/ble_central_service.dart';
 import '../services/ble_peripheral_service.dart';
+import '../services/message_store.dart';
 import '../ble_message.dart';
 import '../utils/string_utils.dart';
 import '../utils/date_utils.dart';
@@ -29,6 +30,7 @@ class BluetoothView extends StatefulWidget {
 class _BluetoothViewState extends State<BluetoothView> {
   late final BleCentralService _centralService;
   late final BlePeripheralService _peripheralService;
+  late final MessageStore _messageStore;
 
   final List<BleMessage> _receivedMessages = [];
   BleMessage? _currentBroadcastMessage;
@@ -38,6 +40,10 @@ class _BluetoothViewState extends State<BluetoothView> {
     super.initState();
     _centralService = Provider.of<BleCentralService>(context, listen: false);
     _peripheralService = Provider.of<BlePeripheralService>(
+      context,
+      listen: false,
+    );
+    _messageStore = Provider.of<MessageStore>(
       context,
       listen: false,
     );
@@ -120,7 +126,7 @@ class _BluetoothViewState extends State<BluetoothView> {
             value: bluetoothProvider.isSourceDevice,
             onChanged: _toggleSourceDevice,
           ),
-
+          
           // Control buttons
           Padding(
             padding: const EdgeInsets.all(16.0),
@@ -146,6 +152,8 @@ class _BluetoothViewState extends State<BluetoothView> {
                     if (bluetoothProvider.isAdvertising) {
                       await _peripheralService.stopBroadcast();
                       bluetoothProvider.setAdvertising(false);
+                      _messageStore.stopAutoRelay();
+                      bluetoothProvider.setAutoRelayEnabled(false);
                       setState(() {
                         _currentBroadcastMessage = null;
                       });
@@ -178,6 +186,14 @@ class _BluetoothViewState extends State<BluetoothView> {
                 Text(
                   'Broadcasting: ${bluetoothProvider.isAdvertising ? "Active" : "Inactive"}',
                 ),
+                if (bluetoothProvider.isAutoRelayEnabled)
+                  Text(
+                    'Auto-Relay: Active (Broadcasting all messages)',
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.primary,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                 Text(
                   'Role: ${bluetoothProvider.isSourceDevice ? "Source" : "Relay"}',
                 ),
@@ -186,9 +202,61 @@ class _BluetoothViewState extends State<BluetoothView> {
             ),
           ),
 
+          // Broadcast logs section (only show when auto-relay is active)
+          if (bluetoothProvider.isAutoRelayEnabled)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Broadcast Logs:',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                    ],
+                  ),
+                  Container(
+                    height: 120,
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.3),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: StreamBuilder<String>(
+                      stream: _messageStore.broadcastLogStream,
+                      initialData: '',
+                      builder: (context, snapshot) {
+                        // Get the initial logs
+                        final logs = _messageStore.recentBroadcastLogs;
+                        
+                        return ListView.builder(
+                          padding: const EdgeInsets.all(8.0),
+                          itemCount: logs.length,
+                          reverse: true, // Show newest logs at the top
+                          itemBuilder: (context, index) {
+                            final log = logs[logs.length - 1 - index]; // Reverse the order
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 2.0),
+                              child: Text(
+                                log,
+                                style: Theme.of(context).textTheme.bodySmall,
+                              ),
+                            );
+                          },
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
           // Current broadcast message
           if (bluetoothProvider.isAdvertising &&
-              _currentBroadcastMessage != null)
+              _currentBroadcastMessage != null &&
+              !bluetoothProvider.isAutoRelayEnabled)
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -313,10 +381,42 @@ class _BluetoothViewState extends State<BluetoothView> {
                   _showAlertSelectionDialog();
                 },
               ),
+              ListTile(
+                leading: const Icon(Icons.sync),
+                title: const Text('Auto-Relay All Messages'),
+                subtitle: const Text('Continuously relay all received messages'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _startAutoRelay();
+                },
+              ),
             ],
           ),
         );
       },
+    );
+  }
+  
+  // Start auto-relay of all messages
+  void _startAutoRelay() async {
+    final provider = Provider.of<BluetoothStateProvider>(
+      context, 
+      listen: false,
+    );
+    
+    // Start the message store auto-relay
+    _messageStore.startAutoRelay();
+    
+    // Update provider state
+    provider.setAutoRelayEnabled(true);
+    provider.setAdvertising(true);
+    
+    // Show a snackbar to confirm
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Auto-relay mode activated. Broadcasting all messages.', style: TextStyle(color: Colors.white)),
+        duration: Duration(seconds: 3),
+      ),
     );
   }
 
