@@ -19,6 +19,7 @@ import 'utils/date_utils.dart';
 import 'views/bluetooth_view.dart';
 import 'services/ble_central_service.dart';
 import 'services/ble_peripheral_service.dart';
+import 'services/message_store.dart';
 import 'providers/bluetooth_state_provider.dart';
 
 void main() async {
@@ -83,6 +84,14 @@ class MyApp extends StatelessWidget {
         ),
         Provider<BlePeripheralService>(create: (_) => BlePeripheralService()),
         ChangeNotifierProvider(create: (_) => BluetoothStateProvider()),
+        ProxyProvider<BlePeripheralService, MessageStore>(
+          create: (context) => MessageStore(
+            Provider.of<BlePeripheralService>(context, listen: false),
+          ),
+          update: (_, peripheralService, previous) => 
+            previous ?? MessageStore(peripheralService),
+          dispose: (_, store) => store.dispose(),
+        ),
       ],
       child: MaterialApp(
         title: 'Vueling Connect',
@@ -172,12 +181,21 @@ class _MyHomePageState extends State<MyHomePage> {
       context,
       listen: false,
     );
+    
+    // Get the message store for automatic relaying
+    final messageStore = Provider.of<MessageStore>(
+      context,
+      listen: false,
+    );
 
     // Subscribe to the BLE central data stream
     _bleCentralSubscription = centralService.dataStream.listen((data) {
       try {
         // Decode the BLE message
         final bleMessage = BleMessage.decode(Uint8List.fromList(data));
+        
+        // Add the message to the store for potential relaying
+        messageStore.addMessage(bleMessage);
 
         // Process the message based on its type
         if (bleMessage.msgType == MsgType.flightStatus &&
@@ -194,6 +212,7 @@ class _MyHomePageState extends State<MyHomePage> {
               bleMessage.status.toString().split('.').last,
             ),
             'source': 'bluetooth', // Mark the source as bluetooth
+            'hop_count': bleMessage.hopCount, // Include hop count
           };
           _updateFlightInfo(flight);
         } else if (bleMessage.msgType == MsgType.alert &&
@@ -209,6 +228,7 @@ class _MyHomePageState extends State<MyHomePage> {
               bleMessage.alertMessage.toString().split('.').last,
             ),
             'source': 'bluetooth', // Mark the source as bluetooth
+            'hop_count': bleMessage.hopCount, // Include hop count
           };
           _addAlert(alert);
         }
@@ -301,6 +321,12 @@ class _MyHomePageState extends State<MyHomePage> {
 
     final apiUrl = 'http://$host:$_serverPort/flight-status';
     print('Connecting to API: $apiUrl');
+    
+    // Get the message store for automatic relaying
+    final messageStore = Provider.of<MessageStore>(
+      context,
+      listen: false,
+    );
 
     try {
       final response = await http.get(Uri.parse(apiUrl));
@@ -315,15 +341,28 @@ class _MyHomePageState extends State<MyHomePage> {
           if (msgType == 'flightStatus') {
             // Only process if we have the minimum required fields
             if (msg['flight_number'] != null) {
+              // Extract timestamp
+              int timestamp = (msg['timestamp'] is int)
+                  ? msg['timestamp']
+                  : int.parse(msg['timestamp'].toString());
+              
+              // Create BLE message for relay
+              final bleMessage = BleMessage.flightStatus(
+                flightNumber: msg['flight_number'],
+                status: _getFlightStatusEnum(msg['status']),
+                timestamp: timestamp,
+              );
+              
+              // Add to message store for relaying
+              messageStore.addMessage(bleMessage);
+              
               // Convert to our format
               final flight = {
                 'flight_number': msg['flight_number'],
                 'flight_status': msg['status'] ?? 'unknown',
                 'timestamp':
                     DateTime.fromMillisecondsSinceEpoch(
-                      (msg['timestamp'] is int)
-                          ? msg['timestamp'] * 1000
-                          : int.parse(msg['timestamp'].toString()) * 1000,
+                      timestamp * 1000,
                     ).toIso8601String(),
                 'flight_message': _getFlightStatusMessage(msg['status']),
                 'source': 'api', // Mark the source as API
@@ -333,14 +372,26 @@ class _MyHomePageState extends State<MyHomePage> {
           } else if (msgType == 'alert') {
             // Only process if we have the minimum required fields
             if (msg['alert_type'] != null && msg['timestamp'] != null) {
+              // Extract timestamp
+              int timestamp = (msg['timestamp'] is int)
+                  ? msg['timestamp']
+                  : int.parse(msg['timestamp'].toString());
+              
+              // Create BLE message for relay
+              final bleMessage = BleMessage.alert(
+                alertMessage: _getAlertMessageEnum(msg['alert_type']),
+                timestamp: timestamp,
+              );
+              
+              // Add to message store for relaying
+              messageStore.addMessage(bleMessage);
+              
               // Process alert
               final alert = {
                 'alert_type': msg['alert_type'],
                 'timestamp':
                     DateTime.fromMillisecondsSinceEpoch(
-                      (msg['timestamp'] is int)
-                          ? msg['timestamp'] * 1000
-                          : int.parse(msg['timestamp'].toString()) * 1000,
+                      timestamp * 1000,
                     ).toIso8601String(),
                 'message': _getAlertMessage(msg['alert_type']),
                 'source': 'api', // Mark the source as API
@@ -358,6 +409,42 @@ class _MyHomePageState extends State<MyHomePage> {
       }
     } catch (e) {
       print('Error fetching from API: $e');
+    }
+  }
+  
+  // Helper to convert string to FlightStatus enum
+  FlightStatus _getFlightStatusEnum(String? status) {
+    if (status == null) return FlightStatus.scheduled;
+
+    switch (status.toLowerCase()) {
+      case 'departed':
+        return FlightStatus.departed;
+      case 'arrived':
+        return FlightStatus.arrived;
+      case 'delayed':
+        return FlightStatus.delayed;
+      case 'cancelled':
+        return FlightStatus.cancelled;
+      case 'scheduled':
+      default:
+        return FlightStatus.scheduled;
+    }
+  }
+  
+  // Helper to convert string to AlertMessage enum
+  AlertMessage _getAlertMessageEnum(String? alertType) {
+    if (alertType == null) return AlertMessage.evacuation;
+
+    switch (alertType.toLowerCase()) {
+      case 'medical':
+        return AlertMessage.medical;
+      case 'fire':
+        return AlertMessage.fire;
+      case 'aliens':
+        return AlertMessage.aliens;
+      case 'evacuation':
+      default:
+        return AlertMessage.evacuation;
     }
   }
 
