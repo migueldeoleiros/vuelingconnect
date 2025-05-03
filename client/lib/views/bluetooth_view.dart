@@ -7,12 +7,19 @@ import '../services/ble_central_service.dart';
 import '../services/ble_peripheral_service.dart';
 import '../ble_message.dart';
 import '../utils/string_utils.dart';
+import '../utils/date_utils.dart';
 import '../widgets/message_cards.dart';
+import '../theme.dart';
 
 class BluetoothView extends StatefulWidget {
   final List<Map<String, dynamic>> savedFlights;
+  final Function(bool) onSourceDeviceToggled;
 
-  const BluetoothView({super.key, required this.savedFlights});
+  const BluetoothView({
+    super.key, 
+    required this.savedFlights,
+    required this.onSourceDeviceToggled,
+  });
 
   @override
   _BluetoothViewState createState() => _BluetoothViewState();
@@ -56,6 +63,16 @@ class _BluetoothViewState extends State<BluetoothView> {
     });
   }
 
+  // Toggle source device mode
+  void _toggleSourceDevice(bool value) {
+    setState(() {
+      _isSourceDevice = value;
+    });
+    
+    // Notify the parent component about the change
+    widget.onSourceDeviceToggled(value);
+  }
+
   // Check and request Bluetooth permissions
   Future<void> _checkAndRequestPermissions() async {
     // Check if we have the necessary permissions
@@ -96,11 +113,7 @@ class _BluetoothViewState extends State<BluetoothView> {
               'Enable to act as the original source of flight information',
             ),
             value: _isSourceDevice,
-            onChanged: (value) {
-              setState(() {
-                _isSourceDevice = value;
-              });
-            },
+            onChanged: _toggleSourceDevice,
           ),
 
           // Control buttons
@@ -260,209 +273,154 @@ class _BluetoothViewState extends State<BluetoothView> {
     );
   }
 
-  String _getAlertName(AlertMessage alert) {
-    return capitalizeFirstLetter(alert.toString().split('.').last);
-  }
-
   void _showBroadcastOptionsDialog() {
     showDialog(
       context: context,
-      builder:
-          (context) => AlertDialog(
-            title: const Text('Select Broadcast Type'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                ListTile(
-                  title: const Text('Flight Status'),
-                  leading: const Icon(Icons.flight),
-                  onTap: () {
-                    Navigator.pop(context);
-                    _showFlightSelectionDialog();
-                  },
-                ),
-                const Divider(),
-                ListTile(
-                  title: const Text('Alert Message'),
-                  leading: const Icon(Icons.warning),
-                  onTap: () {
-                    Navigator.pop(context);
-                    _showAlertSelectionDialog();
-                  },
-                ),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Cancel'),
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Select Broadcast Type'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.flight),
+                title: const Text('Flight Status'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _showFlightSelectionDialog();
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.warning),
+                title: const Text('Alert'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _showAlertSelectionDialog();
+                },
               ),
             ],
           ),
+        );
+      },
     );
   }
 
   void _showFlightSelectionDialog() {
     if (widget.savedFlights.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No flights available to broadcast')),
+        const SnackBar(
+          content: Text('No flights available to broadcast'),
+        ),
       );
       return;
     }
 
     showDialog(
       context: context,
-      builder:
-          (context) => AlertDialog(
-            title: const Text('Select Flight'),
-            content: SizedBox(
-              width: double.maxFinite,
-              height: 300,
-              child: ListView.builder(
-                itemCount: widget.savedFlights.length,
-                itemBuilder: (context, index) {
-                  final flight = widget.savedFlights[index];
-                  return ListTile(
-                    title: Text('Flight ${flight['flight_number']}'),
-                    subtitle: Text('Status: ${flight['flight_status']}'),
-                    onTap: () {
-                      Navigator.pop(context);
-                      _broadcastFlightStatus(flight);
-                    },
-                  );
-                },
-              ),
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Select Flight to Broadcast'),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: ListView.builder(
+              shrinkWrap: true,
+              itemCount: widget.savedFlights.length,
+              itemBuilder: (context, index) {
+                final flight = widget.savedFlights[index];
+                return ListTile(
+                  title: Text('Flight ${flight['flight_number']}'),
+                  subtitle: Text(
+                    '${flight['flight_status']} - ${formatDateTime(flight['timestamp'])}',
+                  ),
+                  onTap: () async {
+                    Navigator.pop(context);
+                    // Create BLE message from flight
+                    // Important: Preserve the original timestamp
+                    final timestamp = DateTime.parse(flight['timestamp']).millisecondsSinceEpoch ~/ 1000;
+                    
+                    final msg = BleMessage.flightStatus(
+                      flightNumber: flight['flight_number'],
+                      status: _getFlightStatusEnum(flight['flight_status']),
+                      timestamp: timestamp, // Use the original timestamp
+                    );
+                    
+                    setState(() {
+                      _currentBroadcastMessage = msg;
+                    });
+                    
+                    await _peripheralService.broadcastMessage(msg.encode());
+                    setState(() {
+                      _isAdvertising = true;
+                    });
+                  },
+                );
+              },
             ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Cancel'),
-              ),
-            ],
           ),
+        );
+      },
     );
   }
 
   void _showAlertSelectionDialog() {
     showDialog(
       context: context,
-      builder:
-          (context) => AlertDialog(
-            title: const Text('Select Alert Type'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Select Alert Type'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (var alertType in AlertMessage.values)
                 ListTile(
-                  title: const Text('Medical Emergency'),
-                  leading: const Icon(
-                    Icons.medical_services,
-                    color: Colors.blue,
+                  leading: Icon(
+                    getAlertIcon(alertType.toString().split('.').last),
+                    color: getAlertColor(alertType.toString().split('.').last),
                   ),
-                  onTap: () {
+                  title: Text(capitalizeFirstLetter(
+                    alertType.toString().split('.').last,
+                  )),
+                  onTap: () async {
                     Navigator.pop(context);
-                    _broadcastAlert(AlertMessage.medical);
+                    // Create BLE message with current timestamp
+                    final msg = BleMessage.alert(
+                      alertMessage: alertType,
+                      timestamp: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+                    );
+                    
+                    setState(() {
+                      _currentBroadcastMessage = msg;
+                    });
+                    
+                    await _peripheralService.broadcastMessage(msg.encode());
+                    setState(() {
+                      _isAdvertising = true;
+                    });
                   },
                 ),
-                ListTile(
-                  title: const Text('Evacuation'),
-                  leading: const Icon(Icons.exit_to_app, color: Colors.red),
-                  onTap: () {
-                    Navigator.pop(context);
-                    _broadcastAlert(AlertMessage.evacuation);
-                  },
-                ),
-                ListTile(
-                  title: const Text('Fire'),
-                  leading: const Icon(
-                    Icons.local_fire_department,
-                    color: Colors.orange,
-                  ),
-                  onTap: () {
-                    Navigator.pop(context);
-                    _broadcastAlert(AlertMessage.fire);
-                  },
-                ),
-                ListTile(
-                  title: const Text('Other Alert'),
-                  leading: const Icon(Icons.warning, color: Colors.purple),
-                  onTap: () {
-                    Navigator.pop(context);
-                    _broadcastAlert(AlertMessage.aliens);
-                  },
-                ),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Cancel'),
-              ),
             ],
           ),
+        );
+      },
     );
   }
 
-  Future<void> _broadcastFlightStatus(Map<String, dynamic> flight) async {
-    final flightNumber = flight['flight_number'];
-    final statusStr = flight['flight_status'].toLowerCase();
-
-    // Convert string status to enum
-    FlightStatus? status;
-    for (var s in FlightStatus.values) {
-      if (s.toString().split('.').last == statusStr) {
-        status = s;
-        break;
-      }
+  FlightStatus _getFlightStatusEnum(String? status) {
+    if (status == null) return FlightStatus.scheduled;
+    
+    switch (status.toLowerCase()) {
+      case 'departed':
+        return FlightStatus.departed;
+      case 'arrived':
+        return FlightStatus.arrived;
+      case 'delayed':
+        return FlightStatus.delayed;
+      case 'cancelled':
+        return FlightStatus.cancelled;
+      case 'scheduled':
+      default:
+        return FlightStatus.scheduled;
     }
-
-    if (status == null) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Invalid flight status')));
-      return;
-    }
-
-    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-    final bleMessage = BleMessage.flightStatus(
-      flightNumber: flightNumber,
-      status: status,
-      timestamp: now,
-    );
-
-    await _peripheralService.broadcastMessage(bleMessage.encode());
-    setState(() {
-      _isAdvertising = true;
-      _currentBroadcastMessage = bleMessage;
-    });
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Broadcasting flight $flightNumber status')),
-    );
-  }
-
-  Future<void> _broadcastAlert(AlertMessage alertType) async {
-    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-    final bleMessage = BleMessage.alert(
-      alertMessage: alertType,
-      timestamp: now,
-    );
-
-    await _peripheralService.broadcastMessage(bleMessage.encode());
-    setState(() {
-      _isAdvertising = true;
-      _currentBroadcastMessage = bleMessage;
-    });
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Broadcasting ${_getAlertName(alertType)} alert'),
-        backgroundColor:
-            alertType == AlertMessage.evacuation ||
-                    alertType == AlertMessage.fire
-                ? Colors.red
-                : null,
-      ),
-    );
   }
 
   @override

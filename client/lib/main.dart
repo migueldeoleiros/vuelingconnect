@@ -102,6 +102,8 @@ class MyHomePage extends StatefulWidget {
 
 class _MyHomePageState extends State<MyHomePage> {
   StreamSubscription<BluetoothAdapterState>? _adapterStateSubscription;
+  StreamSubscription<Uint8List>? _bleCentralSubscription;
+  Timer? _apiPollingTimer;
   final AudioPlayer _audioPlayer = AudioPlayer();
 
   // Flight tracking
@@ -124,6 +126,7 @@ class _MyHomePageState extends State<MyHomePage> {
     _initBluetooth();
     _loadSavedFlights();
     _loadServerSettings();
+    _initBleCentralListener();
   }
 
   Future<void> _loadSavedFlights() async {
@@ -160,86 +163,40 @@ class _MyHomePageState extends State<MyHomePage> {
     await prefs.setString('serverPort', _serverPort);
   }
 
-  // Update existing flight or add new one if it doesn't exist
-  void _updateFlightInfo(Map<String, dynamic> newFlight) {
-    // Validate that we have at least a flight number
-    final flightNumber = newFlight['flight_number'];
-    if (flightNumber == null) {
-      print('Cannot update flight info: Missing flight number');
-      return;
-    }
-
-    final index = _savedFlights.indexWhere(
-      (flight) => flight['flight_number'] == flightNumber,
-    );
-
-    // Make sure all required fields exist with defaults if needed
-    final updatedFlight = {
-      'flight_number': flightNumber,
-      'flight_status': newFlight['flight_status'] ?? 'unknown',
-      'timestamp': newFlight['timestamp'] ?? DateTime.now().toIso8601String(),
-      'flight_message':
-          newFlight['flight_message'] ??
-          _getFlightStatusMessage(newFlight['flight_status']),
-    };
-
-    if (index != -1) {
-      // Flight exists, check timestamp
+  void _initBleCentralListener() {
+    // Get the BLE central service from the provider
+    final centralService = Provider.of<BleCentralService>(context, listen: false);
+    
+    // Subscribe to the BLE central data stream
+    _bleCentralSubscription = centralService.dataStream.listen((data) {
       try {
-        final DateTime existingTimestamp = DateTime.parse(
-          _savedFlights[index]['timestamp'] ?? '',
-        );
-        final DateTime newTimestamp = DateTime.parse(
-          updatedFlight['timestamp'],
-        );
-
-        if (newTimestamp.isAfter(existingTimestamp)) {
-          setState(() {
-            _savedFlights[index] = updatedFlight;
-            _flightInfo = updatedFlight;
-          });
-        } else {
-          // Use existing flight info if it's newer
-          setState(() {
-            _flightInfo = _savedFlights[index];
-          });
+        // Decode the BLE message
+        final bleMessage = BleMessage.decode(Uint8List.fromList(data));
+        
+        // Process the message based on its type
+        if (bleMessage.msgType == MsgType.flightStatus && bleMessage.flightNumber != null) {
+          // Convert BLE flight status message to our format
+          final flight = {
+            'flight_number': bleMessage.flightNumber,
+            'flight_status': bleMessage.status.toString().split('.').last,
+            'timestamp': DateTime.fromMillisecondsSinceEpoch(bleMessage.timestamp * 1000).toIso8601String(),
+            'flight_message': _getFlightStatusMessage(bleMessage.status.toString().split('.').last),
+            'source': 'bluetooth', // Mark the source as bluetooth
+          };
+          _updateFlightInfo(flight);
+        } else if (bleMessage.msgType == MsgType.alert && bleMessage.alertMessage != null) {
+          // Convert BLE alert message to our format
+          final alert = {
+            'alert_type': bleMessage.alertMessage.toString().split('.').last,
+            'timestamp': DateTime.fromMillisecondsSinceEpoch(bleMessage.timestamp * 1000).toIso8601String(),
+            'message': _getAlertMessage(bleMessage.alertMessage.toString().split('.').last),
+            'source': 'bluetooth', // Mark the source as bluetooth
+          };
+          _addAlert(alert);
         }
       } catch (e) {
-        // If there's an issue with timestamp parsing, just update with new info
-        setState(() {
-          _savedFlights[index] = updatedFlight;
-          _flightInfo = updatedFlight;
-        });
-        print('Error parsing timestamps: $e');
+        print('Error processing BLE message: $e');
       }
-    } else {
-      // New flight, add it
-      setState(() {
-        _savedFlights.add(updatedFlight);
-        _flightInfo = updatedFlight;
-      });
-    }
-
-    _saveFlights();
-  }
-
-  // Save an alert
-  void _addAlert(Map<String, dynamic> alert) {
-    // Make sure we have the minimum required fields
-    if (alert['alert_type'] == null) {
-      print('Cannot add alert: Missing alert type');
-      return;
-    }
-
-    // Ensure all required fields have values
-    final safeAlert = {
-      'alert_type': alert['alert_type'],
-      'timestamp': alert['timestamp'] ?? DateTime.now().toIso8601String(),
-      'message': alert['message'] ?? _getAlertMessage(alert['alert_type']),
-    };
-
-    setState(() {
-      _activeAlerts.add(safeAlert);
     });
   }
 
@@ -291,6 +248,32 @@ class _MyHomePageState extends State<MyHomePage> {
       _errorMessage = '';
     });
 
+    // If a flight number was specified, filter the existing flights
+    if (flightNumber.isNotEmpty) {
+      // Find the requested flight in saved flights
+      final matchingFlight = _savedFlights.firstWhere(
+        (flight) => flight['flight_number'] == flightNumber,
+        orElse: () => <String, dynamic>{},
+      );
+
+      setState(() {
+        _flightInfo = matchingFlight.isEmpty ? null : matchingFlight;
+        if (_flightInfo == null) {
+          _errorMessage = 'Flight not found';
+        }
+        _isLoading = false;
+      });
+    } else {
+      // No flight number specified, just show all flights
+      setState(() {
+        _flightInfo = null;
+        _isLoading = false;
+      });
+    }
+  }
+
+  // This method is called periodically when source device is on
+  Future<void> _fetchFlightInfoFromAPI() async {
     // Use 10.0.2.2 instead of localhost when running on Android emulator
     String host = _serverAddress;
     if (!kIsWeb && Platform.isAndroid && host == 'localhost') {
@@ -299,7 +282,7 @@ class _MyHomePageState extends State<MyHomePage> {
     }
 
     final apiUrl = 'http://$host:$_serverPort/flight-status';
-    print('Connecting to: $apiUrl');
+    print('Connecting to API: $apiUrl');
 
     try {
       final response = await http.get(Uri.parse(apiUrl));
@@ -325,6 +308,7 @@ class _MyHomePageState extends State<MyHomePage> {
                           : int.parse(msg['timestamp'].toString()) * 1000,
                     ).toIso8601String(),
                 'flight_message': _getFlightStatusMessage(msg['status']),
+                'source': 'api', // Mark the source as API
               };
               _updateFlightInfo(flight);
             }
@@ -341,64 +325,38 @@ class _MyHomePageState extends State<MyHomePage> {
                           : int.parse(msg['timestamp'].toString()) * 1000,
                     ).toIso8601String(),
                 'message': _getAlertMessage(msg['alert_type']),
+                'source': 'api', // Mark the source as API
               };
               _addAlert(alert);
             }
           }
         }
 
-        // If a flight number was specified, find that specific flight
-        if (flightNumber.isNotEmpty) {
-          // Find the requested flight
-          final matchingFlight = _savedFlights.firstWhere(
-            (flight) => flight['flight_number'] == flightNumber,
-            orElse: () => <String, dynamic>{},
-          );
-
-          setState(() {
-            _flightInfo = matchingFlight.isEmpty ? null : matchingFlight;
-            if (_flightInfo == null) {
-              _errorMessage = 'Flight not found';
-            }
-            _isLoading = false;
-          });
-        } else {
-          // No flight number specified, just show all flights
-          setState(() {
-            _flightInfo = null;
-            _isLoading = false;
-          });
-        }
+        print('Successfully fetched and processed ${messages.length} messages from API');
       } else {
-        setState(() {
-          _errorMessage = 'Failed to fetch flight info: ${response.statusCode}';
-          _isLoading = false;
-        });
+        print('Failed to fetch flight info: ${response.statusCode}');
       }
     } catch (e) {
-      // If we can't reach the server, try to show saved flight info if a flight number was specified
-      if (flightNumber.isNotEmpty) {
-        final savedFlight = _savedFlights.firstWhere(
-          (flight) => flight['flight_number'] == flightNumber,
-          orElse: () => <String, dynamic>{},
-        );
+      print('Error fetching from API: $e');
+    }
+  }
 
-        setState(() {
-          if (savedFlight.isNotEmpty) {
-            _flightInfo = savedFlight;
-            _errorMessage = 'Using saved data. Server error: $e';
-          } else {
-            _errorMessage = 'Error: $e';
-          }
-          _isLoading = false;
-        });
-      } else {
-        // Just show saved flights if we can't reach the server
-        setState(() {
-          _errorMessage = 'Using saved data. Server error: $e';
-          _isLoading = false;
-        });
-      }
+  // This method is called by the Bluetooth view when source device is toggled
+  void _handleSourceDeviceToggled(bool isSourceDevice) {
+    // Start or stop API polling based on source device status
+    if (isSourceDevice) {
+      // Start polling the API every 10 seconds
+      _apiPollingTimer?.cancel();
+      _apiPollingTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+        _fetchFlightInfoFromAPI();
+      });
+      
+      // Fetch immediately on toggle
+      _fetchFlightInfoFromAPI();
+    } else {
+      // Stop polling when source device is turned off
+      _apiPollingTimer?.cancel();
+      _apiPollingTimer = null;
     }
   }
 
@@ -438,6 +396,122 @@ class _MyHomePageState extends State<MyHomePage> {
       default:
         return 'Unknown alert.';
     }
+  }
+
+  // Update existing flight or add new one if it doesn't exist
+  void _updateFlightInfo(Map<String, dynamic> newFlight) {
+    // Validate that we have at least a flight number
+    final flightNumber = newFlight['flight_number'];
+    if (flightNumber == null) {
+      print('Cannot update flight info: Missing flight number');
+      return;
+    }
+
+    final index = _savedFlights.indexWhere(
+      (flight) => flight['flight_number'] == flightNumber,
+    );
+
+    // Make sure all required fields exist with defaults if needed
+    final updatedFlight = {
+      'flight_number': flightNumber,
+      'flight_status': newFlight['flight_status'] ?? 'unknown',
+      'timestamp': newFlight['timestamp'] ?? DateTime.now().toIso8601String(),
+      'flight_message':
+          newFlight['flight_message'] ??
+          _getFlightStatusMessage(newFlight['flight_status']),
+      'source': newFlight['source'] ?? 'api', // Default to 'api' if not specified
+    };
+
+    if (index != -1) {
+      // Flight exists, check if it's identical to avoid duplicates
+      final existingFlight = _savedFlights[index];
+      if (_isIdenticalFlight(existingFlight, updatedFlight)) {
+        print('Rejecting identical flight update for ${updatedFlight['flight_number']}');
+        return;
+      }
+      
+      // Not identical, check timestamp
+      try {
+        final DateTime existingTimestamp = DateTime.parse(
+          _savedFlights[index]['timestamp'] ?? '',
+        );
+        final DateTime newTimestamp = DateTime.parse(
+          updatedFlight['timestamp'],
+        );
+
+        if (newTimestamp.isAfter(existingTimestamp)) {
+          setState(() {
+            _savedFlights[index] = updatedFlight;
+            _flightInfo = updatedFlight;
+          });
+        } else {
+          // Use existing flight info if it's newer
+          setState(() {
+            _flightInfo = _savedFlights[index];
+          });
+        }
+      } catch (e) {
+        // If there's an issue with timestamp parsing, just update with new info
+        setState(() {
+          _savedFlights[index] = updatedFlight;
+          _flightInfo = updatedFlight;
+        });
+        print('Error parsing timestamps: $e');
+      }
+    } else {
+      // New flight, add it
+      setState(() {
+        _savedFlights.add(updatedFlight);
+        _flightInfo = updatedFlight;
+      });
+    }
+
+    _saveFlights();
+  }
+
+  // Check if two flight objects are identical in their key properties
+  bool _isIdenticalFlight(Map<String, dynamic> flight1, Map<String, dynamic> flight2) {
+    return flight1['flight_number'] == flight2['flight_number'] &&
+           flight1['flight_status'] == flight2['flight_status'] &&
+           flight1['timestamp'] == flight2['timestamp'];
+  }
+
+  // Save an alert
+  void _addAlert(Map<String, dynamic> alert) {
+    // Make sure we have the minimum required fields
+    if (alert['alert_type'] == null) {
+      print('Cannot add alert: Missing alert type');
+      return;
+    }
+
+    // Ensure all required fields have values
+    final safeAlert = {
+      'alert_type': alert['alert_type'],
+      'timestamp': alert['timestamp'] ?? DateTime.now().toIso8601String(),
+      'message': alert['message'] ?? _getAlertMessage(alert['alert_type']),
+      'source': alert['source'] ?? 'api', // Default to 'api' if not specified
+    };
+
+    // Check if this alert is a duplicate of an existing one
+    final isDuplicate = _activeAlerts.any((existingAlert) => 
+      _isIdenticalAlert(existingAlert, safeAlert)
+    );
+
+    if (isDuplicate) {
+      print('Rejecting identical alert of type ${safeAlert['alert_type']}');
+      return;
+    }
+
+    setState(() {
+      _activeAlerts.add(safeAlert);
+    });
+  }
+
+  // Check if two alert objects are identical in their key properties
+  bool _isIdenticalAlert(Map<String, dynamic> alert1, Map<String, dynamic> alert2) {
+    return alert1['alert_type'] == alert2['alert_type'] &&
+           alert1['timestamp'] == alert2['timestamp'] &&
+           alert1['message'] == alert2['message'];
   }
 
   // Show alert details dialog
@@ -484,6 +558,8 @@ class _MyHomePageState extends State<MyHomePage> {
   @override
   void dispose() {
     _adapterStateSubscription?.cancel();
+    _bleCentralSubscription?.cancel();
+    _apiPollingTimer?.cancel();
     _flightNumberController.dispose();
     super.dispose();
   }
@@ -560,7 +636,7 @@ class _MyHomePageState extends State<MyHomePage> {
                 const SizedBox(width: 16),
                 ElevatedButton(
                   onPressed: _fetchFlightInfo,
-                  child: const Text('Check Status'),
+                  child: const Text('Filter Flights'),
                 ),
               ],
             ),
@@ -781,7 +857,10 @@ class _MyHomePageState extends State<MyHomePage> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => BluetoothView(savedFlights: _savedFlights),
+        builder: (context) => BluetoothView(
+          savedFlights: _savedFlights,
+          onSourceDeviceToggled: _handleSourceDeviceToggled,
+        ),
       ),
     );
   }

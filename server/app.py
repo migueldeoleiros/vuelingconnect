@@ -54,7 +54,7 @@ def generate_random_alert():
 @app.get("/flight-status")
 async def get_flight_status():
     messages = []
-    for _ in range(5):
+    for _ in range(1):
         msg_type = random.choice(list(MsgType))
         if msg_type == MsgType.flightStatus:
             messages.append(generate_random_flight_info())
@@ -70,3 +70,5 @@ async def get_flight_status():
             "timestamp": msg.timestamp
         } for msg in messages
     ]
+
+# quitar alertas, 

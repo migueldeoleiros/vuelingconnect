@@ -22,6 +22,8 @@ class FlightCard extends StatelessWidget {
     final flightStatus = flight['flight_status'] ?? 'unknown';
     final flightMessage = flight['flight_message'] ?? 'No message available';
     final timestamp = flight['timestamp'] ?? DateTime.now().toIso8601String();
+    final source = flight['source'] ?? 'api';
+    final isBluetoothSource = source == 'bluetooth';
 
     final cardContent = Card(
       elevation: 4,
@@ -31,9 +33,23 @@ class FlightCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Flight $flightNumber',
-              style: Theme.of(context).textTheme.titleLarge,
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'Flight $flightNumber',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+                if (isBluetoothSource)
+                  Tooltip(
+                    message: 'Received via Bluetooth',
+                    child: Icon(
+                      Icons.bluetooth,
+                      color: Colors.blue,
+                      size: 20,
+                    ),
+                  ),
+              ],
             ),
             const SizedBox(height: 8),
             Text(
@@ -46,9 +62,23 @@ class FlightCard extends StatelessWidget {
             const SizedBox(height: 8),
             Text(flightMessage),
             const SizedBox(height: 8),
-            Text(
-              'Last Updated: ${formatDateTime(timestamp)}',
-              style: Theme.of(context).textTheme.bodySmall,
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'Last Updated: ${formatDateTime(timestamp)}',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                if (isBluetoothSource)
+                  Text(
+                    'BLE',
+                    style: TextStyle(
+                      color: Colors.blue,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
+                  ),
+              ],
             ),
           ],
         ),
@@ -79,6 +109,8 @@ class AlertCard extends StatelessWidget {
     final alertType = alert['alert_type'];
     final message = alert['message'] ?? 'No message available';
     final timestamp = alert['timestamp'] ?? DateTime.now().toIso8601String();
+    final source = alert['source'] ?? 'api';
+    final isBluetoothSource = source == 'bluetooth';
 
     return Card(
       elevation: 4,
@@ -86,11 +118,38 @@ class AlertCard extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 12),
       child: ListTile(
         leading: Icon(getAlertIcon(alertType), color: getAlertColor(alertType)),
-        title: Text(
-          capitalizeFirstLetter(alertType),
-          style: const TextStyle(fontWeight: FontWeight.bold),
+        title: Row(
+          children: [
+            Text(
+              capitalizeFirstLetter(alertType),
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            if (isBluetoothSource)
+              Padding(
+                padding: const EdgeInsets.only(left: 8.0),
+                child: Icon(
+                  Icons.bluetooth,
+                  color: Colors.blue,
+                  size: 16,
+                ),
+              ),
+          ],
         ),
-        subtitle: Text(message),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(message),
+            if (isBluetoothSource)
+              Text(
+                'Received via Bluetooth',
+                style: TextStyle(
+                  color: Colors.blue,
+                  fontSize: 12,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+          ],
+        ),
         trailing: Text(
           formatDateTime(timestamp).split(' ')[1], // Just show time
           style: Theme.of(context).textTheme.bodySmall,
@@ -105,6 +164,8 @@ class AlertCard extends StatelessWidget {
     final alertType = alert['alert_type'];
     final message = alert['message'] ?? 'No message available';
     final timestamp = alert['timestamp'] ?? DateTime.now().toIso8601String();
+    final source = alert['source'] ?? 'api';
+    final isBluetoothSource = source == 'bluetooth';
 
     showDialog(
       context: context,
@@ -115,6 +176,15 @@ class AlertCard extends StatelessWidget {
                 Icon(getAlertIcon(alertType), color: getAlertColor(alertType)),
                 const SizedBox(width: 8),
                 const Text('Alert'),
+                if (isBluetoothSource)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 8.0),
+                    child: Icon(
+                      Icons.bluetooth,
+                      color: Colors.blue,
+                      size: 16,
+                    ),
+                  ),
               ],
             ),
             content: Column(
@@ -130,6 +200,17 @@ class AlertCard extends StatelessWidget {
                   'Time: ${formatDateTime(timestamp)}',
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
+                if (isBluetoothSource)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8.0),
+                    child: Text(
+                      'Received via Bluetooth',
+                      style: TextStyle(
+                        color: Colors.blue,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                  ),
               ],
             ),
             actions: [

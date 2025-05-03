@@ -13,6 +13,10 @@ class BleCentralService {
   StreamSubscription<DiscoveredEventArgs>? _discoverSub;
   final StreamController<Uint8List> _dataController = StreamController<Uint8List>.broadcast();
   bool _isScanning = false;
+  
+  // Store hashes of recently processed messages to avoid duplicates
+  final Set<String> _recentMessageHashes = {};
+  static const int _maxRecentMessages = 50; // Limit the size of the set to prevent memory issues
 
   /// Stream of raw manufacturer data bytes (id=0xFFFF)
   Stream<Uint8List> get dataStream => _dataController.stream;
@@ -48,7 +52,13 @@ class BleCentralService {
             for (final msd in event.advertisement.manufacturerSpecificData) {
               if (msd.id == 0xFFFF) {
                 _logger.info('Discovered VuelingConnect data: ${msd.data.length} bytes');
-                _dataController.add(msd.data);
+                
+                // Check if this is a duplicate message
+                if (!_isDuplicateMessage(msd.data)) {
+                  _dataController.add(msd.data);
+                } else {
+                  _logger.info('Rejected duplicate BLE message');
+                }
               }
             }
           }
@@ -66,6 +76,31 @@ class BleCentralService {
       _logger.severe('Failed to start BLE discovery: $e');
       rethrow;
     }
+  }
+
+  /// Check if a message is a duplicate by computing a simple hash
+  bool _isDuplicateMessage(Uint8List data) {
+    // Create a simple hash of the message data
+    final hash = _computeMessageHash(data);
+    
+    // Check if we've seen this hash before
+    if (_recentMessageHashes.contains(hash)) {
+      return true;
+    }
+    
+    // Add to recent messages and maintain size limit
+    _recentMessageHashes.add(hash);
+    if (_recentMessageHashes.length > _maxRecentMessages) {
+      _recentMessageHashes.remove(_recentMessageHashes.first);
+    }
+    
+    return false;
+  }
+  
+  /// Compute a simple hash for a message
+  String _computeMessageHash(Uint8List data) {
+    // Simple hash function - convert bytes to hex string
+    return data.map((byte) => byte.toRadixString(16).padLeft(2, '0')).join();
   }
 
   /// Check and request Bluetooth permissions
@@ -118,6 +153,7 @@ class BleCentralService {
   void dispose() {
     stopDiscovery();
     _dataController.close();
+    _recentMessageHashes.clear();
     _logger.info('Disposed BleCentralService');
   }
 }
