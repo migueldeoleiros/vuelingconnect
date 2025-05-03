@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'dart:typed_data';
 import 'dart:io';
+import 'dart:async';
 import 'package:permission_handler/permission_handler.dart';
 import '../services/ble_central_service.dart';
 import '../services/ble_peripheral_service.dart';
@@ -27,13 +28,21 @@ class BluetoothView extends StatefulWidget {
   _BluetoothViewState createState() => _BluetoothViewState();
 }
 
+// Renamed to match the key type in main.dart
+typedef BluetoothViewState = _BluetoothViewState;
+
 class _BluetoothViewState extends State<BluetoothView> {
   late final BleCentralService _centralService;
   late final BlePeripheralService _peripheralService;
   late final MessageStore _messageStore;
 
   final List<BleMessage> _receivedMessages = [];
+  final List<Map<String, dynamic>> _apiMessages = [];
   BleMessage? _currentBroadcastMessage;
+  
+  // Stream controller for API messages
+  final StreamController<Map<String, dynamic>> _apiMessageController = 
+      StreamController<Map<String, dynamic>>.broadcast();
 
   @override
   void initState() {
@@ -58,12 +67,34 @@ class _BluetoothViewState extends State<BluetoothView> {
       try {
         final msg = BleMessage.decode(Uint8List.fromList(data));
         setState(() {
-          _receivedMessages.add(msg);
+          // Add to the beginning of the list for newest first
+          _receivedMessages.insert(0, msg);
+          
+          // Keep the list size manageable
+          if (_receivedMessages.length > 50) {
+            _receivedMessages.removeLast();
+          }
         });
       } catch (e) {
         print('Error decoding BLE message: $e');
       }
     });
+  }
+  
+  // Add an API message to the stream
+  void addApiMessage(Map<String, dynamic> message) {
+    _apiMessageController.add(message);
+    
+    // Add to the beginning of the list for newest first
+    _apiMessages.insert(0, message);
+    
+    // Limit the number of stored API messages
+    if (_apiMessages.length > 50) {
+      _apiMessages.removeLast();
+    }
+    
+    // Force a UI update
+    setState(() {});
   }
 
   // Toggle source device mode
@@ -234,9 +265,9 @@ class _BluetoothViewState extends State<BluetoothView> {
                         return ListView.builder(
                           padding: const EdgeInsets.all(8.0),
                           itemCount: logs.length,
-                          reverse: true, // Show newest logs at the top
                           itemBuilder: (context, index) {
-                            final log = logs[logs.length - 1 - index]; // Reverse the order
+                            // Logs are already in newest-first order
+                            final log = logs[index];
                             return Padding(
                               padding: const EdgeInsets.symmetric(vertical: 2.0),
                               child: Text(
@@ -312,44 +343,85 @@ class _BluetoothViewState extends State<BluetoothView> {
 
           // Received messages list
           Expanded(
-            child:
-                _receivedMessages.isEmpty
-                    ? const Center(child: Text('No messages received'))
-                    : ListView.builder(
-                      itemCount: _receivedMessages.length,
-                      itemBuilder: (context, index) {
-                        final message = _receivedMessages[index];
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+                  child: Text(
+                    'Received Messages:',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                ),
+                Expanded(
+                  child: StreamBuilder<Map<String, dynamic>>(
+                    stream: _apiMessageController.stream,
+                    builder: (context, snapshot) {
+                      // Combine BLE and API messages
+                      final List<Widget> messageWidgets = [];
+                      
+                      // Add BLE messages
+                      for (final message in _receivedMessages) {
+                        final timestamp = DateTime.fromMillisecondsSinceEpoch(
+                          message.timestamp * 1000,
+                        ).toIso8601String().substring(11, 19); // HH:MM:SS
+                        
+                        String logText;
                         if (message.msgType == MsgType.flightStatus) {
-                          return FlightCard(
-                            flight: {
-                              'flight_number': message.flightNumber,
-                              'flight_status':
-                                  message.status.toString().split('.').last,
-                              'flight_message': 'Received flight update',
-                              'timestamp':
-                                  DateTime.fromMillisecondsSinceEpoch(
-                                    message.timestamp * 1000,
-                                  ).toIso8601String(),
-                            },
-                          );
+                          logText = '[$timestamp] BLE: Flight ${message.flightNumber} (${message.status.toString().split('.').last}) - Hop: ${message.hopCount}';
                         } else {
-                          return AlertCard(
-                            alert: {
-                              'alert_type':
-                                  message.alertMessage
-                                      .toString()
-                                      .split('.')
-                                      .last,
-                              'message': 'Alert received via Bluetooth',
-                              'timestamp':
-                                  DateTime.fromMillisecondsSinceEpoch(
-                                    message.timestamp * 1000,
-                                  ).toIso8601String(),
-                            },
-                          );
+                          logText = '[$timestamp] BLE: Alert: ${message.alertMessage.toString().split('.').last} - Hop: ${message.hopCount}';
                         }
-                      },
-                    ),
+                        
+                        messageWidgets.add(
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 2.0, horizontal: 16.0),
+                            child: Text(
+                              logText,
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ),
+                        );
+                      }
+                      
+                      // Add API messages
+                      for (final message in _apiMessages) {
+                        final timestamp = DateTime.parse(
+                          message['timestamp'],
+                        ).toIso8601String().substring(11, 19); // HH:MM:SS
+                        
+                        String logText;
+                        if (message['msg_type'] == 'flight') {
+                          logText = '[$timestamp] API: Flight ${message['flight_number']} (${message['flight_status']})';
+                        } else {
+                          logText = '[$timestamp] API: Alert: ${message['alert_type']}';
+                        }
+                        
+                        messageWidgets.add(
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 2.0, horizontal: 16.0),
+                            child: Text(
+                              logText,
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ),
+                        );
+                      }
+                      
+                      // If no messages, show a placeholder
+                      if (messageWidgets.isEmpty) {
+                        return const Center(child: Text('No messages received'));
+                      }
+                      
+                      // No need to sort since we're already inserting newest messages at the beginning
+                      return ListView(
+                        children: messageWidgets,
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -545,5 +617,6 @@ class _BluetoothViewState extends State<BluetoothView> {
   @override
   void dispose() {
     super.dispose();
+    _apiMessageController.close();
   }
 }

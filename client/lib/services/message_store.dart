@@ -174,9 +174,10 @@ class MessageStore {
     final timestamp = DateTime.now().toIso8601String().substring(11, 19); // HH:MM:SS
     final logEntry = '[$timestamp] $log';
     
-    _recentBroadcastLogs.add(logEntry);
+    // Add to the beginning of the list for newest first
+    _recentBroadcastLogs.insert(0, logEntry);
     if (_recentBroadcastLogs.length > MAX_LOG_ENTRIES) {
-      _recentBroadcastLogs.removeAt(0);
+      _recentBroadcastLogs.removeLast();
     }
     
     // Send to stream for UI updates

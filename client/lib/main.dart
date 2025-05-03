@@ -132,6 +132,8 @@ class _MyHomePageState extends State<MyHomePage> {
   // Alerts information
   final List<Map<String, dynamic>> _activeAlerts = [];
 
+  final _bluetoothViewKey = GlobalKey<BluetoothViewState>();
+
   @override
   void initState() {
     super.initState();
@@ -327,6 +329,9 @@ class _MyHomePageState extends State<MyHomePage> {
       context,
       listen: false,
     );
+    
+    // Get reference to the Bluetooth view to send API messages
+    final bluetoothViewState = _bluetoothViewKey.currentState;
 
     try {
       final response = await http.get(Uri.parse(apiUrl));
@@ -366,8 +371,14 @@ class _MyHomePageState extends State<MyHomePage> {
                     ).toIso8601String(),
                 'flight_message': _getFlightStatusMessage(msg['status']),
                 'source': 'api', // Mark the source as API
+                'msg_type': 'flight',
               };
               _updateFlightInfo(flight);
+              
+              // Send to Bluetooth view if available
+              if (bluetoothViewState != null) {
+                bluetoothViewState.addApiMessage(flight);
+              }
             }
           } else if (msgType == 'alert') {
             // Only process if we have the minimum required fields
@@ -395,8 +406,14 @@ class _MyHomePageState extends State<MyHomePage> {
                     ).toIso8601String(),
                 'message': _getAlertMessage(msg['alert_type']),
                 'source': 'api', // Mark the source as API
+                'msg_type': 'alert',
               };
               _addAlert(alert);
+              
+              // Send to Bluetooth view if available
+              if (bluetoothViewState != null) {
+                bluetoothViewState.addApiMessage(alert);
+              }
             }
           }
         }
@@ -994,6 +1011,7 @@ class _MyHomePageState extends State<MyHomePage> {
             (context) => BluetoothView(
               savedFlights: _savedFlights,
               onSourceDeviceToggled: _handleSourceDeviceToggled,
+              key: _bluetoothViewKey,
             ),
       ),
     );
