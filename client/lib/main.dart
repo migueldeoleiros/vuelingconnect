@@ -159,12 +159,6 @@ class _MyHomePageState extends State<MyHomePage> {
 
   Future<void> _fetchFlightInfo() async {
     final flightNumber = _flightNumberController.text.trim();
-    if (flightNumber.isEmpty) {
-      setState(() {
-        _errorMessage = 'Please enter a flight number';
-      });
-      return;
-    }
 
     setState(() {
       _isLoading = true;
@@ -193,19 +187,28 @@ class _MyHomePageState extends State<MyHomePage> {
           _updateFlightInfo(Map<String, dynamic>.from(flight));
         }
 
-        // Find the requested flight
-        final matchingFlight = _savedFlights.firstWhere(
-          (flight) => flight['flight_number'] == flightNumber,
-          orElse: () => <String, dynamic>{},
-        );
+        // If a flight number was specified, find that specific flight
+        if (flightNumber.isNotEmpty) {
+          // Find the requested flight
+          final matchingFlight = _savedFlights.firstWhere(
+            (flight) => flight['flight_number'] == flightNumber,
+            orElse: () => <String, dynamic>{},
+          );
 
-        setState(() {
-          _flightInfo = matchingFlight.isEmpty ? null : matchingFlight;
-          if (_flightInfo == null) {
-            _errorMessage = 'Flight not found';
-          }
-          _isLoading = false;
-        });
+          setState(() {
+            _flightInfo = matchingFlight.isEmpty ? null : matchingFlight;
+            if (_flightInfo == null) {
+              _errorMessage = 'Flight not found';
+            }
+            _isLoading = false;
+          });
+        } else {
+          // No flight number specified, just show all flights
+          setState(() {
+            _flightInfo = null;
+            _isLoading = false;
+          });
+        }
       } else {
         setState(() {
           _errorMessage = 'Failed to fetch flight info: ${response.statusCode}';
@@ -213,21 +216,29 @@ class _MyHomePageState extends State<MyHomePage> {
         });
       }
     } catch (e) {
-      // If we can't reach the server, try to show saved flight info
-      final savedFlight = _savedFlights.firstWhere(
-        (flight) => flight['flight_number'] == flightNumber,
-        orElse: () => <String, dynamic>{},
-      );
+      // If we can't reach the server, try to show saved flight info if a flight number was specified
+      if (flightNumber.isNotEmpty) {
+        final savedFlight = _savedFlights.firstWhere(
+          (flight) => flight['flight_number'] == flightNumber,
+          orElse: () => <String, dynamic>{},
+        );
 
-      setState(() {
-        if (savedFlight.isNotEmpty) {
-          _flightInfo = savedFlight;
+        setState(() {
+          if (savedFlight.isNotEmpty) {
+            _flightInfo = savedFlight;
+            _errorMessage = 'Using saved data. Server error: $e';
+          } else {
+            _errorMessage = 'Error: $e';
+          }
+          _isLoading = false;
+        });
+      } else {
+        // Just show saved flights if we can't reach the server
+        setState(() {
           _errorMessage = 'Using saved data. Server error: $e';
-        } else {
-          _errorMessage = 'Error: $e';
-        }
-        _isLoading = false;
-      });
+          _isLoading = false;
+        });
+      }
     }
   }
 
@@ -236,6 +247,50 @@ class _MyHomePageState extends State<MyHomePage> {
     _adapterStateSubscription?.cancel();
     _flightNumberController.dispose();
     super.dispose();
+  }
+
+  // Flight card widget for reuse
+  Widget _buildFlightCard(
+    Map<String, dynamic> flight, {
+    bool isExpanded = false,
+  }) {
+    final cardContent = Card(
+      elevation: 4,
+      margin: isExpanded ? EdgeInsets.zero : const EdgeInsets.only(bottom: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Flight ${flight['flight_number']}',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Status: ${flight['flight_status']}',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: getStatusColor(flight['flight_status']),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(flight['flight_message']),
+            const SizedBox(height: 8),
+            Text(
+              'Last Updated: ${_formatDateTime(flight['original_message_timestamp'])}',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (isExpanded) {
+      return SizedBox(width: double.infinity, child: cardContent);
+    }
+
+    return cardContent;
   }
 
   @override
@@ -286,7 +341,18 @@ class _MyHomePageState extends State<MyHomePage> {
                 ),
               ],
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 8),
+            Center(
+              child: TextButton.icon(
+                onPressed: () {
+                  _flightNumberController.clear();
+                  _fetchFlightInfo();
+                },
+                icon: const Icon(Icons.list),
+                label: const Text('View All Flights'),
+              ),
+            ),
+            const SizedBox(height: 16),
 
             // Flight info display
             if (_isLoading)
@@ -294,36 +360,44 @@ class _MyHomePageState extends State<MyHomePage> {
             else if (_errorMessage.isNotEmpty)
               SelectableText(_errorMessage, style: TextStyle(color: Colors.red))
             else if (_flightInfo != null)
-              Card(
-                elevation: 4,
-                margin: EdgeInsets.zero,
-                child: Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(16.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Flight ${_flightInfo!['flight_number']}',
-                        style: Theme.of(context).textTheme.titleLarge,
+              _buildFlightCard(_flightInfo!, isExpanded: true)
+            else if (_savedFlights.isNotEmpty)
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'All Flights',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 8),
+                    Expanded(
+                      child: ListView.builder(
+                        itemCount: _savedFlights.length,
+                        itemBuilder: (context, index) {
+                          final flight = _savedFlights[index];
+                          return GestureDetector(
+                            onTap: () {
+                              setState(() {
+                                _flightNumberController.text =
+                                    flight['flight_number'];
+                                _flightInfo = flight;
+                              });
+                            },
+                            child: _buildFlightCard(flight),
+                          );
+                        },
                       ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Status: ${_flightInfo!['flight_status']}',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: getStatusColor(_flightInfo!['flight_status']),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(_flightInfo!['flight_message']),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Last Updated: ${_formatDateTime(_flightInfo!['original_message_timestamp'])}',
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                    ],
-                  ),
+                    ),
+                  ],
+                ),
+              )
+            else
+              Center(
+                child: Text(
+                  'No flights available. Try connecting to the server or checking a specific flight.',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodyLarge,
                 ),
               ),
           ],
