@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:http/http.dart' as http;
+import 'package:prueba_app/ble_message.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:logging/logging.dart';
 import 'package:provider/provider.dart';
@@ -17,6 +18,7 @@ import 'services/ble_peripheral_service.dart';
 
 void main() {
   // Set up logging
+  // testBleMessage();   
   Logger.root.level = Level.ALL;
   Logger.root.onRecord.listen((record) {
     print('${record.level.name}: ${record.time}: ${record.message}');

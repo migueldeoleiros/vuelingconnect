@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'dart:convert';
+import 'dart:typed_data';
 import '../services/ble_central_service.dart';
 import '../services/ble_peripheral_service.dart';
-import '../models/flight_info.dart';
-import '../theme.dart';
 
 class BluetoothView extends StatefulWidget {
   final List<Map<String, dynamic>> savedFlights;
@@ -22,7 +22,7 @@ class _BluetoothViewState extends State<BluetoothView> {
   late final BleCentralService _centralService;
   late final BlePeripheralService _peripheralService;
 
-  List<FlightInfo> _flightList = [];
+  List<String> _receivedMessages = [];
 
   @override
   void initState() {
@@ -33,55 +33,14 @@ class _BluetoothViewState extends State<BluetoothView> {
       listen: false,
     );
 
-    // Listen to flight updates from central service
-    _centralService.flightsStream.listen((flights) {
+    // Listen to BLE message stream
+    _centralService.dataStream.listen((data) {
+      final msg = utf8.decode(data);
       setState(() {
-        _flightList = flights;
-
-        // If we're acting as a mesh node, also rebroadcast the data
-        if (!_isSourceDevice && _isAdvertising) {
-          _peripheralService.updateFlights(_flightList);
-        }
+        _receivedMessages.add(msg);
       });
     });
-
-    // Convert saved flights to FlightInfo objects
-    _convertSavedFlights();
   }
-
-  void _convertSavedFlights() {
-    final flightInfoList =
-        widget.savedFlights.map((flightMap) {
-          // Convert from flight_number format to flightNumber format for consistency
-          return FlightInfo(
-            flightNumber: flightMap['flight_number'] ?? '',
-            destination: flightMap['destination'] ?? 'Unknown',
-            gate: flightMap['gate'] ?? 'TBD',
-            // Handle non-existent fields by providing defaults
-            departureTime:
-                DateTime.tryParse(flightMap['departure_time'] ?? '') ??
-                DateTime.now().add(const Duration(hours: 1)),
-            status: flightMap['flight_status'] ?? 'Unknown',
-            timestamp:
-                DateTime.tryParse(
-                  flightMap['original_message_timestamp'] ?? '',
-                ) ??
-                DateTime.now(),
-          );
-        }).toList();
-
-    _flightList = flightInfoList;
-
-    // If we're the source device, start advertising immediately
-    if (_isSourceDevice && _flightList.isNotEmpty) {
-      _peripheralService.startAdvertising(_flightList);
-      setState(() {
-        _isAdvertising = true;
-      });
-    }
-  }
-
-  // Using the getStatusColor from theme.dart
 
   @override
   Widget build(BuildContext context) {
@@ -112,9 +71,9 @@ class _BluetoothViewState extends State<BluetoothView> {
                 ElevatedButton(
                   onPressed: () async {
                     if (_isScanning) {
-                      await _centralService.stopScan();
+                      await _centralService.stopDiscovery();
                     } else {
-                      await _centralService.startScan();
+                      await _centralService.startDiscovery();
                     }
                     setState(() {
                       _isScanning = !_isScanning;
@@ -125,13 +84,15 @@ class _BluetoothViewState extends State<BluetoothView> {
                 ElevatedButton(
                   onPressed: () async {
                     if (_isAdvertising) {
-                      await _peripheralService.stopAdvertising();
+                      await _peripheralService.stopBroadcast();
                     } else {
-                      await _peripheralService.startAdvertising(_flightList);
+                      // Broadcast sample message
+                      final bytes = Uint8List.fromList(utf8.encode('Hello BLE'));
+                      await _peripheralService.broadcastMessage(bytes);
+                      setState(() {
+                        _isAdvertising = !_isAdvertising;
+                      });
                     }
-                    setState(() {
-                      _isAdvertising = !_isAdvertising;
-                    });
                   },
                   child: Text(
                     _isAdvertising ? 'Stop Broadcast' : 'Start Broadcast',
@@ -152,51 +113,33 @@ class _BluetoothViewState extends State<BluetoothView> {
                 Text('Scanning: ${_isScanning ? "Active" : "Inactive"}'),
                 Text('Broadcasting: ${_isAdvertising ? "Active" : "Inactive"}'),
                 Text('Role: ${_isSourceDevice ? "Source" : "Relay"}'),
-                Text('Flights in memory: ${_flightList.length}'),
+                Text('Received Messages: ${_receivedMessages.length}'),
               ],
             ),
           ),
 
-          // Flight list
+          // Received messages list
           Expanded(
-            child:
-                _flightList.isEmpty
-                    ? const Center(
-                      child: Text('No flight information available'),
-                    )
-                    : ListView.builder(
-                      itemCount: _flightList.length,
-                      itemBuilder: (context, index) {
-                        final flight = _flightList[index];
-                        return Card(
-                          margin: const EdgeInsets.symmetric(
-                            horizontal: 16.0,
-                            vertical: 8.0,
-                          ),
-                          child: ListTile(
-                            title: Text('Flight ${flight.flightNumber}'),
-                            subtitle: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Status: ${flight.status}',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    color: getStatusColor(flight.status),
-                                  ),
-                                ),
-                                Text('Destination: ${flight.destination}'),
-                                Text('Gate: ${flight.gate}'),
-                                Text(
-                                  'Departure: ${flight.departureTime.hour}:${flight.departureTime.minute.toString().padLeft(2, '0')}',
-                                ),
-                              ],
-                            ),
-                            isThreeLine: true,
-                          ),
-                        );
-                      },
-                    ),
+            child: _receivedMessages.isEmpty
+                ? const Center(
+                    child: Text('No messages received'),
+                  )
+                : ListView.builder(
+                    itemCount: _receivedMessages.length,
+                    itemBuilder: (context, index) {
+                      final message = _receivedMessages[index];
+                      return Card(
+                        margin: const EdgeInsets.symmetric(
+                          horizontal: 16.0,
+                          vertical: 8.0,
+                        ),
+                        child: ListTile(
+                          title: Text('Message $index'),
+                          subtitle: Text(message),
+                        ),
+                      );
+                    },
+                  ),
           ),
         ],
       ),
