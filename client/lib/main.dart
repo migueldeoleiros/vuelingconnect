@@ -11,6 +11,7 @@ import 'package:prueba_app/ble_message.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:logging/logging.dart';
 import 'package:provider/provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'theme.dart';
 import 'widgets/message_cards.dart';
 import 'utils/string_utils.dart';
@@ -19,7 +20,7 @@ import 'views/bluetooth_view.dart';
 import 'services/ble_central_service.dart';
 import 'services/ble_peripheral_service.dart';
 
-void main() {
+void main() async {
   // Set up logging
   // testBleMessage();
   Logger.root.level = Level.ALL;
@@ -30,7 +31,41 @@ void main() {
     }
   });
 
+  // Ensure Flutter is initialized before using platform channels
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  // Request permissions on startup for Android
+  if (Platform.isAndroid) {
+    await _requestBluetoothPermissions();
+  }
+
   runApp(const MyApp());
+}
+
+// Request Bluetooth permissions required for Android 12+
+Future<void> _requestBluetoothPermissions() async {
+  // Request all required permissions
+  Map<Permission, PermissionStatus> statuses = await [
+    Permission.bluetooth,
+    Permission.bluetoothScan,
+    Permission.bluetoothConnect,
+    Permission.bluetoothAdvertise,
+    Permission.location,
+  ].request();
+  
+  // Log the permission statuses
+  statuses.forEach((permission, status) {
+    print('$permission: $status');
+  });
+  
+  // Try to enable Bluetooth if it's not already on
+  try {
+    if (!await FlutterBluePlus.isOn) {
+      await FlutterBluePlus.turnOn();
+    }
+  } catch (e) {
+    print('Error turning on Bluetooth: $e');
+  }
 }
 
 class MyApp extends StatelessWidget {

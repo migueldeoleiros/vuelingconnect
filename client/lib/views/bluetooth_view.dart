@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'dart:typed_data';
+import 'dart:io';
+import 'package:permission_handler/permission_handler.dart';
 import '../services/ble_central_service.dart';
 import '../services/ble_peripheral_service.dart';
 import '../ble_message.dart';
@@ -36,6 +38,11 @@ class _BluetoothViewState extends State<BluetoothView> {
       listen: false,
     );
 
+    // Check permissions before initializing Bluetooth
+    if (Platform.isAndroid) {
+      _checkAndRequestPermissions();
+    }
+
     // Listen to BLE message stream
     _centralService.dataStream.listen((data) {
       try {
@@ -47,6 +54,33 @@ class _BluetoothViewState extends State<BluetoothView> {
         print('Error decoding BLE message: $e');
       }
     });
+  }
+
+  // Check and request Bluetooth permissions
+  Future<void> _checkAndRequestPermissions() async {
+    // Check if we have the necessary permissions
+    bool hasBluetoothScan = await Permission.bluetoothScan.isGranted;
+    bool hasBluetoothConnect = await Permission.bluetoothConnect.isGranted;
+    bool hasBluetoothAdvertise = await Permission.bluetoothAdvertise.isGranted;
+    bool hasLocation = await Permission.location.isGranted;
+
+    // If any permission is missing, request all of them
+    if (!hasBluetoothScan || !hasBluetoothConnect || !hasBluetoothAdvertise || !hasLocation) {
+      print('Requesting Bluetooth permissions from Bluetooth view...');
+      
+      Map<Permission, PermissionStatus> statuses = await [
+        Permission.bluetooth,
+        Permission.bluetoothScan,
+        Permission.bluetoothConnect,
+        Permission.bluetoothAdvertise,
+        Permission.location,
+      ].request();
+      
+      // Log the results
+      statuses.forEach((permission, status) {
+        print('$permission: $status');
+      });
+    }
   }
 
   @override
