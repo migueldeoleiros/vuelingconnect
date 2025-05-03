@@ -12,6 +12,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:logging/logging.dart';
 import 'package:provider/provider.dart';
 import 'theme.dart';
+import 'widgets/message_cards.dart';
+import 'utils/string_utils.dart';
+import 'utils/date_utils.dart';
 import 'views/bluetooth_view.dart';
 import 'services/ble_central_service.dart';
 import 'services/ble_peripheral_service.dart';
@@ -402,31 +405,8 @@ class _MyHomePageState extends State<MyHomePage> {
     }
   }
 
-  // Get color for alert type
-  Color _getAlertColor(String? alertType) {
-    if (alertType == null) return Colors.grey;
-
-    switch (alertType) {
-      case 'medical':
-        return Colors.blue;
-      case 'evacuation':
-        return Colors.red;
-      case 'fire':
-        return Colors.orange;
-      case 'aliens':
-        return Colors.purple;
-      default:
-        return Colors.grey;
-    }
-  }
-
   // Show alert details dialog
   void _showAlertDialog(Map<String, dynamic> alert) {
-    // Validate required fields exist with reasonable defaults
-    final alertType = alert['alert_type'];
-    final message = alert['message'] ?? 'No message available';
-    final timestamp = alert['timestamp'] ?? DateTime.now().toIso8601String();
-
     showDialog(
       context: context,
       builder:
@@ -434,8 +414,8 @@ class _MyHomePageState extends State<MyHomePage> {
             title: Row(
               children: [
                 Icon(
-                  _getAlertIcon(alertType),
-                  color: _getAlertColor(alertType),
+                  getAlertIcon(alert['alert_type']),
+                  color: getAlertColor(alert['alert_type']),
                 ),
                 const SizedBox(width: 8),
                 const Text('Alert'),
@@ -446,12 +426,12 @@ class _MyHomePageState extends State<MyHomePage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  message,
+                  alert['message'] ?? 'No message available',
                   style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Time: ${_formatDateTime(timestamp)}',
+                  'Time: ${formatDateTime(alert['timestamp'])}',
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
               ],
@@ -466,114 +446,11 @@ class _MyHomePageState extends State<MyHomePage> {
     );
   }
 
-  // Get icon for alert type
-  IconData _getAlertIcon(String? alertType) {
-    if (alertType == null) return Icons.notification_important;
-
-    switch (alertType) {
-      case 'medical':
-        return Icons.medical_services;
-      case 'evacuation':
-        return Icons.exit_to_app;
-      case 'fire':
-        return Icons.local_fire_department;
-      case 'aliens':
-        return Icons.warning;
-      default:
-        return Icons.notification_important;
-    }
-  }
-
   @override
   void dispose() {
     _adapterStateSubscription?.cancel();
     _flightNumberController.dispose();
     super.dispose();
-  }
-
-  // Flight card widget for reuse
-  Widget _buildFlightCard(
-    Map<String, dynamic> flight, {
-    bool isExpanded = false,
-  }) {
-    // Validate required fields exist with reasonable defaults
-    final flightNumber = flight['flight_number'] ?? 'Unknown';
-    final flightStatus = flight['flight_status'] ?? 'unknown';
-    final flightMessage = flight['flight_message'] ?? 'No message available';
-    final timestamp = flight['timestamp'] ?? DateTime.now().toIso8601String();
-
-    final cardContent = Card(
-      elevation: 4,
-      margin: isExpanded ? EdgeInsets.zero : const EdgeInsets.only(bottom: 12),
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Flight $flightNumber',
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Status: ${_capitalizeFirstLetter(flightStatus)}',
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                color: getStatusColor(flightStatus),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(flightMessage),
-            const SizedBox(height: 8),
-            Text(
-              'Last Updated: ${_formatDateTime(timestamp)}',
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-          ],
-        ),
-      ),
-    );
-
-    if (isExpanded) {
-      return SizedBox(width: double.infinity, child: cardContent);
-    }
-
-    return cardContent;
-  }
-
-  // Alert card widget
-  Widget _buildAlertCard(Map<String, dynamic> alert) {
-    // Validate required fields exist with reasonable defaults
-    final alertType = alert['alert_type'];
-    final message = alert['message'] ?? 'No message available';
-    final timestamp = alert['timestamp'] ?? DateTime.now().toIso8601String();
-
-    return Card(
-      elevation: 4,
-      color: _getAlertColor(alertType).withOpacity(0.2),
-      margin: const EdgeInsets.only(bottom: 12),
-      child: ListTile(
-        leading: Icon(
-          _getAlertIcon(alertType),
-          color: _getAlertColor(alertType),
-        ),
-        title: Text(
-          _capitalizeFirstLetter(alertType),
-          style: const TextStyle(fontWeight: FontWeight.bold),
-        ),
-        subtitle: Text(message),
-        trailing: Text(
-          _formatDateTime(timestamp).split(' ')[1], // Just show time
-          style: Theme.of(context).textTheme.bodySmall,
-        ),
-        onTap: () => _showAlertDialog(alert),
-      ),
-    );
-  }
-
-  String _capitalizeFirstLetter(String? text) {
-    if (text == null || text.isEmpty) return text ?? '';
-    return text[0].toUpperCase() + text.substring(1);
   }
 
   @override
@@ -622,7 +499,10 @@ class _MyHomePageState extends State<MyHomePage> {
                 ],
               ),
               const SizedBox(height: 8),
-              _buildAlertCard(_activeAlerts.last),
+              AlertCard(
+                alert: _activeAlerts.last,
+                onTap: () => _showAlertDialog(_activeAlerts.last),
+              ),
               const SizedBox(height: 16),
             ],
 
@@ -668,7 +548,7 @@ class _MyHomePageState extends State<MyHomePage> {
             else if (_errorMessage.isNotEmpty)
               SelectableText(_errorMessage, style: TextStyle(color: Colors.red))
             else if (_flightInfo != null)
-              _buildFlightCard(_flightInfo!, isExpanded: true)
+              FlightCard(flight: _flightInfo!, isExpanded: true)
             else if (_savedFlights.isNotEmpty)
               Expanded(
                 child: Column(
@@ -684,7 +564,8 @@ class _MyHomePageState extends State<MyHomePage> {
                         itemCount: _savedFlights.length,
                         itemBuilder: (context, index) {
                           final flight = _savedFlights[index];
-                          return GestureDetector(
+                          return FlightCard(
+                            flight: flight,
                             onTap: () {
                               setState(() {
                                 _flightNumberController.text =
@@ -692,7 +573,6 @@ class _MyHomePageState extends State<MyHomePage> {
                                 _flightInfo = flight;
                               });
                             },
-                            child: _buildFlightCard(flight),
                           );
                         },
                       ),
@@ -714,17 +594,6 @@ class _MyHomePageState extends State<MyHomePage> {
     );
   }
 
-  String _formatDateTime(String? isoString) {
-    if (isoString == null) return 'Unknown';
-
-    try {
-      final dateTime = DateTime.parse(isoString);
-      return '${dateTime.day}/${dateTime.month}/${dateTime.year} ${dateTime.hour}:${dateTime.minute}';
-    } catch (e) {
-      return isoString;
-    }
-  }
-
   void _showAlertsDialog() {
     showDialog(
       context: context,
@@ -740,7 +609,13 @@ class _MyHomePageState extends State<MyHomePage> {
                       : ListView.builder(
                         itemCount: _activeAlerts.length,
                         itemBuilder: (context, index) {
-                          return _buildAlertCard(_activeAlerts[index]);
+                          return AlertCard(
+                            alert: _activeAlerts[index],
+                            onTap: () {
+                              Navigator.pop(context);
+                              _showAlertDialog(_activeAlerts[index]);
+                            },
+                          );
                         },
                       ),
             ),
@@ -842,8 +717,8 @@ class _MyHomePageState extends State<MyHomePage> {
                           return ListTile(
                             title: Text('Flight ${flight['flight_number']}'),
                             subtitle: Text(
-                              'Status: ${_capitalizeFirstLetter(flight['flight_status'])}\n'
-                              'Last Updated: ${_formatDateTime(flight['timestamp'])}',
+                              'Status: ${capitalizeFirstLetter(flight['flight_status'])}\n'
+                              'Last Updated: ${formatDateTime(flight['timestamp'])}',
                             ),
                             onTap: () {
                               _flightNumberController.text =

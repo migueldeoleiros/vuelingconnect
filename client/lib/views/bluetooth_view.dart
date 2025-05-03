@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import '../services/ble_central_service.dart';
 import '../services/ble_peripheral_service.dart';
 import '../ble_message.dart';
+import '../utils/string_utils.dart';
 
 class BluetoothView extends StatefulWidget {
   final List<Map<String, dynamic>> savedFlights;
@@ -203,7 +204,7 @@ class _BluetoothViewState extends State<BluetoothView> {
       final dateTime = DateTime.fromMillisecondsSinceEpoch(
         message.timestamp * 1000,
       );
-      final statusText = _capitalizeFirstLetter(
+      final statusText = capitalizeFirstLetter(
         message.status.toString().split('.').last,
       );
       return 'Status: $statusText\nTime: ${dateTime.hour}:${dateTime.minute}';
@@ -267,12 +268,7 @@ class _BluetoothViewState extends State<BluetoothView> {
   }
 
   String _getAlertName(AlertMessage alert) {
-    return _capitalizeFirstLetter(alert.toString().split('.').last);
-  }
-
-  String _capitalizeFirstLetter(String text) {
-    if (text.isEmpty) return text;
-    return text[0].toUpperCase() + text.substring(1);
+    return capitalizeFirstLetter(alert.toString().split('.').last);
   }
 
   void _showBroadcastOptionsDialog() {

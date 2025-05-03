@@ -4,6 +4,13 @@ import 'package:flutter/material.dart';
 const vuelingYellow = Color(0xFFFFF000);
 const vuelingGray = Color(0xFF58595B);
 
+// Alert colors
+const alertMedicalColor = Colors.blue;
+const alertEvacuationColor = Colors.red;
+const alertFireColor = Colors.orange;
+const alertAliensColor = Colors.purple;
+const alertDefaultColor = Colors.grey;
+
 // Light theme
 ThemeData getLightTheme() {
   return ThemeData(
@@ -77,5 +84,41 @@ Color getStatusColor(String? status) {
       return Colors.red[300]!;
     default:
       return Colors.grey[300]!;
+  }
+}
+
+// Get color for alert type
+Color getAlertColor(String? alertType) {
+  if (alertType == null) return alertDefaultColor;
+
+  switch (alertType) {
+    case 'medical':
+      return alertMedicalColor;
+    case 'evacuation':
+      return alertEvacuationColor;
+    case 'fire':
+      return alertFireColor;
+    case 'aliens':
+      return alertAliensColor;
+    default:
+      return alertDefaultColor;
+  }
+}
+
+// Get icon for alert type
+IconData getAlertIcon(String? alertType) {
+  if (alertType == null) return Icons.notification_important;
+
+  switch (alertType) {
+    case 'medical':
+      return Icons.medical_services;
+    case 'evacuation':
+      return Icons.exit_to_app;
+    case 'fire':
+      return Icons.local_fire_department;
+    case 'aliens':
+      return Icons.warning;
+    default:
+      return Icons.notification_important;
   }
 }
