@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'theme.dart';
 
 void main() {
@@ -49,10 +50,72 @@ class _MyHomePageState extends State<MyHomePage> {
       'localhost'; // Change to your computer's IP when testing on a real device
   String _serverPort = '8000';
 
+  // Stored flight information
+  List<Map<String, dynamic>> _savedFlights = [];
+
   @override
   void initState() {
     super.initState();
     _initBluetooth();
+    _loadSavedFlights();
+  }
+
+  Future<void> _loadSavedFlights() async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedFlightsJson = prefs.getString('savedFlights');
+
+    if (savedFlightsJson != null) {
+      setState(() {
+        _savedFlights = List<Map<String, dynamic>>.from(
+          (jsonDecode(savedFlightsJson) as List).map(
+            (flight) => Map<String, dynamic>.from(flight as Map),
+          ),
+        );
+      });
+    }
+  }
+
+  Future<void> _saveFlights() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('savedFlights', jsonEncode(_savedFlights));
+  }
+
+  // Update existing flight or add new one if it doesn't exist
+  void _updateFlightInfo(Map<String, dynamic> newFlight) {
+    final flightNumber = newFlight['flight_number'];
+    final index = _savedFlights.indexWhere(
+      (flight) => flight['flight_number'] == flightNumber,
+    );
+
+    if (index != -1) {
+      // Flight exists, check timestamp
+      final DateTime existingTimestamp = DateTime.parse(
+        _savedFlights[index]['original_message_timestamp'],
+      );
+      final DateTime newTimestamp = DateTime.parse(
+        newFlight['original_message_timestamp'],
+      );
+
+      if (newTimestamp.isAfter(existingTimestamp)) {
+        setState(() {
+          _savedFlights[index] = newFlight;
+          _flightInfo = newFlight;
+        });
+      } else {
+        // Use existing flight info if it's newer
+        setState(() {
+          _flightInfo = _savedFlights[index];
+        });
+      }
+    } else {
+      // New flight, add it
+      setState(() {
+        _savedFlights.add(newFlight);
+        _flightInfo = newFlight;
+      });
+    }
+
+    _saveFlights();
   }
 
   Future<void> _initBluetooth() async {
@@ -124,13 +187,20 @@ class _MyHomePageState extends State<MyHomePage> {
 
       if (response.statusCode == 200) {
         final List<dynamic> flightStatuses = jsonDecode(response.body);
-        final flightInfo = flightStatuses.firstWhere(
+
+        // Save all flight information
+        for (var flight in flightStatuses) {
+          _updateFlightInfo(Map<String, dynamic>.from(flight));
+        }
+
+        // Find the requested flight
+        final matchingFlight = _savedFlights.firstWhere(
           (flight) => flight['flight_number'] == flightNumber,
-          orElse: () => null,
+          orElse: () => <String, dynamic>{},
         );
 
         setState(() {
-          _flightInfo = flightInfo;
+          _flightInfo = matchingFlight.isEmpty ? null : matchingFlight;
           if (_flightInfo == null) {
             _errorMessage = 'Flight not found';
           }
@@ -143,8 +213,19 @@ class _MyHomePageState extends State<MyHomePage> {
         });
       }
     } catch (e) {
+      // If we can't reach the server, try to show saved flight info
+      final savedFlight = _savedFlights.firstWhere(
+        (flight) => flight['flight_number'] == flightNumber,
+        orElse: () => <String, dynamic>{},
+      );
+
       setState(() {
-        _errorMessage = 'Error: $e';
+        if (savedFlight.isNotEmpty) {
+          _flightInfo = savedFlight;
+          _errorMessage = 'Using saved data. Server error: $e';
+        } else {
+          _errorMessage = 'Error: $e';
+        }
         _isLoading = false;
       });
     }
@@ -169,6 +250,11 @@ class _MyHomePageState extends State<MyHomePage> {
             icon: const Icon(Icons.settings),
             onPressed: _showServerSettings,
             tooltip: 'Server Settings',
+          ),
+          IconButton(
+            icon: const Icon(Icons.list),
+            onPressed: _showSavedFlights,
+            tooltip: 'Saved Flights',
           ),
         ],
       ),
@@ -306,6 +392,50 @@ class _MyHomePageState extends State<MyHomePage> {
                   );
                 },
                 child: const Text('Save'),
+              ),
+            ],
+          ),
+    );
+  }
+
+  void _showSavedFlights() {
+    showDialog(
+      context: context,
+      builder:
+          (context) => AlertDialog(
+            title: const Text('Saved Flights'),
+            content: SizedBox(
+              width: double.maxFinite,
+              child:
+                  _savedFlights.isEmpty
+                      ? const Text('No saved flights')
+                      : ListView.builder(
+                        shrinkWrap: true,
+                        itemCount: _savedFlights.length,
+                        itemBuilder: (context, index) {
+                          final flight = _savedFlights[index];
+                          return ListTile(
+                            title: Text('Flight ${flight['flight_number']}'),
+                            subtitle: Text(
+                              'Status: ${flight['flight_status']}\n'
+                              'Last Updated: ${_formatDateTime(flight['original_message_timestamp'])}',
+                            ),
+                            onTap: () {
+                              _flightNumberController.text =
+                                  flight['flight_number'];
+                              setState(() {
+                                _flightInfo = flight;
+                              });
+                              Navigator.pop(context);
+                            },
+                          );
+                        },
+                      ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Close'),
               ),
             ],
           ),
