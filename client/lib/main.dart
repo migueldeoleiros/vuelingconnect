@@ -14,7 +14,6 @@ import 'package:provider/provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'theme.dart';
 import 'widgets/message_cards.dart';
-import 'utils/string_utils.dart';
 import 'utils/date_utils.dart';
 import 'views/bluetooth_view.dart';
 import 'services/ble_central_service.dart';
@@ -580,19 +579,30 @@ class _MyHomePageState extends State<MyHomePage> {
         if (newTimestamp.isAfter(existingTimestamp)) {
           setState(() {
             _savedFlights[index] = updatedFlight;
-            _flightInfo = updatedFlight;
+            
+            // Only update _flightInfo if we're currently viewing this specific flight
+            if (_flightInfo != null && _flightInfo!['flight_number'] == flightNumber) {
+              _flightInfo = updatedFlight;
+            }
           });
         } else {
           // Use existing flight info if it's newer
           setState(() {
-            _flightInfo = _savedFlights[index];
+            // Only update _flightInfo if we're currently viewing this specific flight
+            if (_flightInfo != null && _flightInfo!['flight_number'] == flightNumber) {
+              _flightInfo = _savedFlights[index];
+            }
           });
         }
       } catch (e) {
         // If there's an issue with timestamp parsing, just update with new info
         setState(() {
           _savedFlights[index] = updatedFlight;
-          _flightInfo = updatedFlight;
+          
+          // Only update _flightInfo if we're currently viewing this specific flight
+          if (_flightInfo != null && _flightInfo!['flight_number'] == flightNumber) {
+            _flightInfo = updatedFlight;
+          }
         });
         print('Error parsing timestamps: $e');
       }
@@ -600,11 +610,29 @@ class _MyHomePageState extends State<MyHomePage> {
       // New flight, add it
       setState(() {
         _savedFlights.add(updatedFlight);
-        _flightInfo = updatedFlight;
+        
+        // Don't automatically set _flightInfo to the new flight
+        // This allows the "All Flights" view to remain visible
       });
     }
 
     _saveFlights();
+  }
+
+  // Get flights sorted by timestamp (most recent first)
+  List<Map<String, dynamic>> _getSortedFlights() {
+    final sortedFlights = List<Map<String, dynamic>>.from(_savedFlights);
+    sortedFlights.sort((a, b) {
+      try {
+        final DateTime timeA = DateTime.parse(a['timestamp'] ?? '');
+        final DateTime timeB = DateTime.parse(b['timestamp'] ?? '');
+        return timeB.compareTo(timeA); // Descending order (newest first)
+      } catch (e) {
+        print('Error parsing timestamps during sorting: $e');
+        return 0;
+      }
+    });
+    return sortedFlights;
   }
 
   // Check if two flight objects are identical in their key properties
@@ -717,20 +745,17 @@ class _MyHomePageState extends State<MyHomePage> {
         title: Text(widget.title),
         actions: [
           IconButton(
-            icon: const Icon(Icons.settings),
-            onPressed: _showServerSettings,
-            tooltip: 'Server Settings',
-          ),
-          IconButton(
-            icon: const Icon(Icons.list),
-            onPressed: _showSavedFlights,
-            tooltip: 'Saved Flights',
-          ),
-          IconButton(
             icon: const Icon(Icons.bluetooth),
             onPressed: _navigateToBluetoothView,
             tooltip: 'Bluetooth Mesh',
           ),
+          IconButton(
+            icon: const Icon(Icons.settings),
+            onPressed: _showServerSettings,
+            tooltip: 'Server Settings',
+          ),
+
+
         ],
       ),
       body: Padding(
@@ -775,6 +800,9 @@ class _MyHomePageState extends State<MyHomePage> {
                     decoration: const InputDecoration(
                       labelText: 'Enter Flight Number (e.g., VY2375)',
                     ),
+                    onChanged: (value) {
+                      setState(() {});
+                    },
                   ),
                 ),
                 const SizedBox(width: 16),
@@ -785,16 +813,17 @@ class _MyHomePageState extends State<MyHomePage> {
               ],
             ),
             const SizedBox(height: 8),
-            Center(
-              child: TextButton.icon(
-                onPressed: () {
-                  _flightNumberController.clear();
-                  _fetchFlightInfo();
-                },
-                icon: const Icon(Icons.list),
-                label: const Text('View All Flights'),
+            if (_flightNumberController.text.isNotEmpty)
+              Center(
+                child: TextButton.icon(
+                  onPressed: () {
+                    _flightNumberController.clear();
+                    _fetchFlightInfo();
+                  },
+                  icon: const Icon(Icons.list),         
+                  label: const Text('View All Flights'),
+                ),
               ),
-            ),
             const SizedBox(height: 16),
 
             // Flight info display
@@ -816,9 +845,9 @@ class _MyHomePageState extends State<MyHomePage> {
                     const SizedBox(height: 8),
                     Expanded(
                       child: ListView.builder(
-                        itemCount: _savedFlights.length,
+                        itemCount: _getSortedFlights().length,
                         itemBuilder: (context, index) {
-                          final flight = _savedFlights[index];
+                          final flight = _getSortedFlights()[index];
                           return FlightCard(
                             flight: flight,
                             onTap: () {
@@ -953,57 +982,7 @@ class _MyHomePageState extends State<MyHomePage> {
     );
   }
 
-  void _showSavedFlights() {
-    showDialog(
-      context: context,
-      builder:
-          (context) => AlertDialog(
-            title: const Text('Saved Flights'),
-            content: SizedBox(
-              width: double.maxFinite,
-              child:
-                  _savedFlights.isEmpty
-                      ? const Text('No saved flights')
-                      : ListView.builder(
-                        shrinkWrap: true,
-                        itemCount: _savedFlights.length,
-                        itemBuilder: (context, index) {
-                          final flight = _savedFlights[index];
-                          return ListTile(
-                            title: Text('Flight ${flight['flight_number']}'),
-                            subtitle: Text(
-                              'Status: ${capitalizeFirstLetter(flight['flight_status'])}\n'
-                              'Last Updated: ${formatDateTime(flight['timestamp'])}',
-                            ),
-                            onTap: () {
-                              _flightNumberController.text =
-                                  flight['flight_number'];
-                              setState(() {
-                                _flightInfo = flight;
-                              });
-                              Navigator.pop(context);
-                            },
-                          );
-                        },
-                      ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Close'),
-              ),
-            ],
-          ),
-    );
-  }
-
   void _navigateToBluetoothView() {
-    // Get the current provider state to maintain consistency
-    final bluetoothState = Provider.of<BluetoothStateProvider>(
-      context,
-      listen: false,
-    );
-
     Navigator.push(
       context,
       MaterialPageRoute(
