@@ -1,25 +1,43 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:convert';
+import 'dart:io';
 
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
-import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:http/http.dart' as http;
-import 'package:prueba_app/ble_message.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:logging/logging.dart';
-import 'package:provider/provider.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'theme.dart';
-import 'widgets/message_cards.dart';
-import 'utils/string_utils.dart';
-import 'utils/date_utils.dart';
-import 'views/bluetooth_view.dart';
+import 'package:provider/provider.dart';
+import 'package:prueba_app/ble_message.dart';
+import 'package:prueba_app/views/points_view.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import 'providers/bluetooth_state_provider.dart';
 import 'services/ble_central_service.dart';
 import 'services/ble_peripheral_service.dart';
 import 'package:prueba_app/views/points_view.dart';
+import 'services/message_store.dart';
+import 'theme.dart';
+import 'utils/date_utils.dart';
+import 'utils/string_utils.dart';
+import 'views/bluetooth_view.dart';
+import 'widgets/message_cards.dart';
+
+final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
+    FlutterLocalNotificationsPlugin();
+final StreamController<NotificationResponse> selectNotificationStream =
+    StreamController<NotificationResponse>.broadcast();
+
+const MethodChannel platform = MethodChannel(
+  'dexterx.dev/flutter_local_notifications_example',
+);
+
+const String portName = 'notification_send_port';
+
 
 void main() async {
   // Set up logging
@@ -34,11 +52,26 @@ void main() async {
 
   // Ensure Flutter is initialized before using platform channels
   WidgetsFlutterBinding.ensureInitialized();
-  
+
+  await Permission.notification.request();
+
   // Request permissions on startup for Android
   if (Platform.isAndroid) {
     await _requestBluetoothPermissions();
   }
+
+  const AndroidInitializationSettings initializationSettingsAndroid =
+      AndroidInitializationSettings('@mipmap/ic_launcher');
+
+  const InitializationSettings initializationSettings = InitializationSettings(
+    android: initializationSettingsAndroid,
+  );
+
+  await flutterLocalNotificationsPlugin.initialize(
+    initializationSettings,
+    onDidReceiveNotificationResponse: selectNotificationStream.add,
+    onDidReceiveBackgroundNotificationResponse: null,
+  );
 
   runApp(const MyApp());
 }
@@ -46,19 +79,20 @@ void main() async {
 // Request Bluetooth permissions required for Android 12+
 Future<void> _requestBluetoothPermissions() async {
   // Request all required permissions
-  Map<Permission, PermissionStatus> statuses = await [
-    Permission.bluetooth,
-    Permission.bluetoothScan,
-    Permission.bluetoothConnect,
-    Permission.bluetoothAdvertise,
-    Permission.location,
-  ].request();
-  
+  Map<Permission, PermissionStatus> statuses =
+      await [
+        Permission.bluetooth,
+        Permission.bluetoothScan,
+        Permission.bluetoothConnect,
+        Permission.bluetoothAdvertise,
+        Permission.location,
+      ].request();
+
   // Log the permission statuses
   statuses.forEach((permission, status) {
     print('$permission: $status');
   });
-  
+
   // Try to enable Bluetooth if it's not already on
   try {
     if (!await FlutterBluePlus.isOn) {
@@ -72,6 +106,24 @@ Future<void> _requestBluetoothPermissions() async {
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
+  Future<void> showNotification() async {
+    const AndroidNotificationDetails androidPlatformChannelSpecifics =
+        AndroidNotificationDetails(
+          'your_channel_id', // Change this to a unique ID
+          'Local Notifications',
+        );
+    const NotificationDetails platformChannelSpecifics = NotificationDetails(
+      android: androidPlatformChannelSpecifics,
+    );
+
+    await flutterLocalNotificationsPlugin.show(
+      0,
+      'Hello, Flutter!',
+      'This is your first local notification.',
+      platformChannelSpecifics,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return MultiProvider(
@@ -81,6 +133,17 @@ class MyApp extends StatelessWidget {
           dispose: (_, service) => service.dispose(),
         ),
         Provider<BlePeripheralService>(create: (_) => BlePeripheralService()),
+        ChangeNotifierProvider(create: (_) => BluetoothStateProvider()),
+        ProxyProvider<BlePeripheralService, MessageStore>(
+          create:
+              (context) => MessageStore(
+                Provider.of<BlePeripheralService>(context, listen: false),
+              ),
+          update:
+              (_, peripheralService, previous) =>
+                  previous ?? MessageStore(peripheralService),
+          dispose: (_, store) => store.dispose(),
+        ),
       ],
       child: MaterialApp(
         title: 'Vueling Connect',
@@ -120,6 +183,8 @@ class _MyHomePageState extends State<MyHomePage> {
 
   // Alerts information
   final List<Map<String, dynamic>> _activeAlerts = [];
+
+  final _bluetoothViewKey = GlobalKey<BluetoothViewState>();
 
   @override
   void initState() {
@@ -196,32 +261,55 @@ class _MyHomePageState extends State<MyHomePage> {
 
   void _initBleCentralListener() {
     // Get the BLE central service from the provider
-    final centralService = Provider.of<BleCentralService>(context, listen: false);
-    
+    final centralService = Provider.of<BleCentralService>(
+      context,
+      listen: false,
+    );
+
+    // Get the message store for automatic relaying
+    final messageStore = Provider.of<MessageStore>(context, listen: false);
+
     // Subscribe to the BLE central data stream
     _bleCentralSubscription = centralService.dataStream.listen((data) {
       try {
         // Decode the BLE message
         final bleMessage = BleMessage.decode(Uint8List.fromList(data));
-        
+
+        // Add the message to the store for potential relaying
+        messageStore.addMessage(bleMessage);
+
         // Process the message based on its type
-        if (bleMessage.msgType == MsgType.flightStatus && bleMessage.flightNumber != null) {
+        if (bleMessage.msgType == MsgType.flightStatus &&
+            bleMessage.flightNumber != null) {
           // Convert BLE flight status message to our format
           final flight = {
             'flight_number': bleMessage.flightNumber,
             'flight_status': bleMessage.status.toString().split('.').last,
-            'timestamp': DateTime.fromMillisecondsSinceEpoch(bleMessage.timestamp * 1000).toIso8601String(),
-            'flight_message': _getFlightStatusMessage(bleMessage.status.toString().split('.').last),
+            'timestamp':
+                DateTime.fromMillisecondsSinceEpoch(
+                  bleMessage.timestamp * 1000,
+                ).toIso8601String(),
+            'flight_message': _getFlightStatusMessage(
+              bleMessage.status.toString().split('.').last,
+            ),
             'source': 'bluetooth', // Mark the source as bluetooth
+            'hop_count': bleMessage.hopCount, // Include hop count
           };
           _updateFlightInfo(flight);
-        } else if (bleMessage.msgType == MsgType.alert && bleMessage.alertMessage != null) {
+        } else if (bleMessage.msgType == MsgType.alert &&
+            bleMessage.alertMessage != null) {
           // Convert BLE alert message to our format
           final alert = {
             'alert_type': bleMessage.alertMessage.toString().split('.').last,
-            'timestamp': DateTime.fromMillisecondsSinceEpoch(bleMessage.timestamp * 1000).toIso8601String(),
-            'message': _getAlertMessage(bleMessage.alertMessage.toString().split('.').last),
+            'timestamp':
+                DateTime.fromMillisecondsSinceEpoch(
+                  bleMessage.timestamp * 1000,
+                ).toIso8601String(),
+            'message': _getAlertMessage(
+              bleMessage.alertMessage.toString().split('.').last,
+            ),
             'source': 'bluetooth', // Mark the source as bluetooth
+            'hop_count': bleMessage.hopCount, // Include hop count
           };
           _addAlert(alert);
         }
@@ -315,6 +403,12 @@ class _MyHomePageState extends State<MyHomePage> {
     final apiUrl = 'http://$host:$_serverPort/flight-status';
     print('Connecting to API: $apiUrl');
 
+    // Get the message store for automatic relaying
+    final messageStore = Provider.of<MessageStore>(context, listen: false);
+
+    // Get reference to the Bluetooth view to send API messages
+    final bluetoothViewState = _bluetoothViewKey.currentState;
+
     try {
       final response = await http.get(Uri.parse(apiUrl));
 
@@ -328,42 +422,83 @@ class _MyHomePageState extends State<MyHomePage> {
           if (msgType == 'flightStatus') {
             // Only process if we have the minimum required fields
             if (msg['flight_number'] != null) {
+              // Extract timestamp
+              int timestamp =
+                  (msg['timestamp'] is int)
+                      ? msg['timestamp']
+                      : int.parse(msg['timestamp'].toString());
+
+              // Create BLE message for relay
+              final bleMessage = BleMessage.flightStatus(
+                flightNumber: msg['flight_number'],
+                status: _getFlightStatusEnum(msg['status']),
+                timestamp: timestamp,
+              );
+
+              // Add to message store for relaying
+              messageStore.addMessage(bleMessage);
+
               // Convert to our format
               final flight = {
                 'flight_number': msg['flight_number'],
                 'flight_status': msg['status'] ?? 'unknown',
                 'timestamp':
                     DateTime.fromMillisecondsSinceEpoch(
-                      (msg['timestamp'] is int)
-                          ? msg['timestamp'] * 1000
-                          : int.parse(msg['timestamp'].toString()) * 1000,
+                      timestamp * 1000,
                     ).toIso8601String(),
                 'flight_message': _getFlightStatusMessage(msg['status']),
                 'source': 'api', // Mark the source as API
+                'msg_type': 'flight',
               };
               _updateFlightInfo(flight);
+
+              // Send to Bluetooth view if available
+              if (bluetoothViewState != null) {
+                bluetoothViewState.addApiMessage(flight);
+              }
             }
           } else if (msgType == 'alert') {
             // Only process if we have the minimum required fields
             if (msg['alert_type'] != null && msg['timestamp'] != null) {
+              // Extract timestamp
+              int timestamp =
+                  (msg['timestamp'] is int)
+                      ? msg['timestamp']
+                      : int.parse(msg['timestamp'].toString());
+
+              // Create BLE message for relay
+              final bleMessage = BleMessage.alert(
+                alertMessage: _getAlertMessageEnum(msg['alert_type']),
+                timestamp: timestamp,
+              );
+
+              // Add to message store for relaying
+              messageStore.addMessage(bleMessage);
+
               // Process alert
               final alert = {
                 'alert_type': msg['alert_type'],
                 'timestamp':
                     DateTime.fromMillisecondsSinceEpoch(
-                      (msg['timestamp'] is int)
-                          ? msg['timestamp'] * 1000
-                          : int.parse(msg['timestamp'].toString()) * 1000,
+                      timestamp * 1000,
                     ).toIso8601String(),
                 'message': _getAlertMessage(msg['alert_type']),
                 'source': 'api', // Mark the source as API
+                'msg_type': 'alert',
               };
               _addAlert(alert);
+
+              // Send to Bluetooth view if available
+              if (bluetoothViewState != null) {
+                bluetoothViewState.addApiMessage(alert);
+              }
             }
           }
         }
 
-        print('Successfully fetched and processed ${messages.length} messages from API');
+        print(
+          'Successfully fetched and processed ${messages.length} messages from API',
+        );
       } else {
         print('Failed to fetch flight info: ${response.statusCode}');
       }
@@ -372,8 +507,55 @@ class _MyHomePageState extends State<MyHomePage> {
     }
   }
 
+  // Helper to convert string to FlightStatus enum
+  FlightStatus _getFlightStatusEnum(String? status) {
+    if (status == null) return FlightStatus.scheduled;
+
+    switch (status.toLowerCase()) {
+      case 'departed':
+        return FlightStatus.departed;
+      case 'arrived':
+        return FlightStatus.arrived;
+      case 'delayed':
+        return FlightStatus.delayed;
+      case 'cancelled':
+        return FlightStatus.cancelled;
+      case 'scheduled':
+      default:
+        return FlightStatus.scheduled;
+    }
+  }
+
+  // Helper to convert string to AlertMessage enum
+  AlertMessage _getAlertMessageEnum(String? alertType) {
+    if (alertType == null) return AlertMessage.evacuation;
+
+    switch (alertType.toLowerCase()) {
+      case 'medical':
+        return AlertMessage.medical;
+      case 'fire':
+        return AlertMessage.fire;
+      case 'aliens':
+        return AlertMessage.aliens;
+      case 'evacuation':
+      default:
+        return AlertMessage.evacuation;
+    }
+  }
+
   // This method is called by the Bluetooth view when source device is toggled
   void _handleSourceDeviceToggled(bool isSourceDevice) {
+    // Get the provider to ensure state is in sync
+    final provider = Provider.of<BluetoothStateProvider>(
+      context,
+      listen: false,
+    );
+
+    // Make sure provider state matches what we received
+    if (provider.isSourceDevice != isSourceDevice) {
+      provider.setSourceDevice(isSourceDevice);
+    }
+
     // Start or stop API polling based on source device status
     if (isSourceDevice) {
       // Start polling the API every 10 seconds
@@ -381,7 +563,7 @@ class _MyHomePageState extends State<MyHomePage> {
       _apiPollingTimer = Timer.periodic(const Duration(seconds: 10), (_) {
         _fetchFlightInfoFromAPI();
       });
-      
+
       // Fetch immediately on toggle
       _fetchFlightInfoFromAPI();
     } else {
@@ -450,17 +632,20 @@ class _MyHomePageState extends State<MyHomePage> {
       'flight_message':
           newFlight['flight_message'] ??
           _getFlightStatusMessage(newFlight['flight_status']),
-      'source': newFlight['source'] ?? 'api', // Default to 'api' if not specified
+      'source':
+          newFlight['source'] ?? 'api', // Default to 'api' if not specified
     };
 
     if (index != -1) {
       // Flight exists, check if it's identical to avoid duplicates
       final existingFlight = _savedFlights[index];
       if (_isIdenticalFlight(existingFlight, updatedFlight)) {
-        print('Rejecting identical flight update for ${updatedFlight['flight_number']}');
+        print(
+          'Rejecting identical flight update for ${updatedFlight['flight_number']}',
+        );
         return;
       }
-      
+
       // Not identical, check timestamp
       try {
         final DateTime existingTimestamp = DateTime.parse(
@@ -473,19 +658,33 @@ class _MyHomePageState extends State<MyHomePage> {
         if (newTimestamp.isAfter(existingTimestamp)) {
           setState(() {
             _savedFlights[index] = updatedFlight;
-            _flightInfo = updatedFlight;
+
+            // Only update _flightInfo if we're currently viewing this specific flight
+            if (_flightInfo != null &&
+                _flightInfo!['flight_number'] == flightNumber) {
+              _flightInfo = updatedFlight;
+            }
           });
         } else {
           // Use existing flight info if it's newer
           setState(() {
-            _flightInfo = _savedFlights[index];
+            // Only update _flightInfo if we're currently viewing this specific flight
+            if (_flightInfo != null &&
+                _flightInfo!['flight_number'] == flightNumber) {
+              _flightInfo = _savedFlights[index];
+            }
           });
         }
       } catch (e) {
         // If there's an issue with timestamp parsing, just update with new info
         setState(() {
           _savedFlights[index] = updatedFlight;
-          _flightInfo = updatedFlight;
+
+          // Only update _flightInfo if we're currently viewing this specific flight
+          if (_flightInfo != null &&
+              _flightInfo!['flight_number'] == flightNumber) {
+            _flightInfo = updatedFlight;
+          }
         });
         print('Error parsing timestamps: $e');
       }
@@ -493,18 +692,39 @@ class _MyHomePageState extends State<MyHomePage> {
       // New flight, add it
       setState(() {
         _savedFlights.add(updatedFlight);
-        _flightInfo = updatedFlight;
+
+        // Don't automatically set _flightInfo to the new flight
+        // This allows the "All Flights" view to remain visible
       });
     }
 
     _saveFlights();
   }
 
+  // Get flights sorted by timestamp (most recent first)
+  List<Map<String, dynamic>> _getSortedFlights() {
+    final sortedFlights = List<Map<String, dynamic>>.from(_savedFlights);
+    sortedFlights.sort((a, b) {
+      try {
+        final DateTime timeA = DateTime.parse(a['timestamp'] ?? '');
+        final DateTime timeB = DateTime.parse(b['timestamp'] ?? '');
+        return timeB.compareTo(timeA); // Descending order (newest first)
+      } catch (e) {
+        print('Error parsing timestamps during sorting: $e');
+        return 0;
+      }
+    });
+    return sortedFlights;
+  }
+
   // Check if two flight objects are identical in their key properties
-  bool _isIdenticalFlight(Map<String, dynamic> flight1, Map<String, dynamic> flight2) {
+  bool _isIdenticalFlight(
+    Map<String, dynamic> flight1,
+    Map<String, dynamic> flight2,
+  ) {
     return flight1['flight_number'] == flight2['flight_number'] &&
-           flight1['flight_status'] == flight2['flight_status'] &&
-           flight1['timestamp'] == flight2['timestamp'];
+        flight1['flight_status'] == flight2['flight_status'] &&
+        flight1['timestamp'] == flight2['timestamp'];
   }
 
   // Save an alert
@@ -524,8 +744,8 @@ class _MyHomePageState extends State<MyHomePage> {
     };
 
     // Check if this alert is a duplicate of an existing one
-    final isDuplicate = _activeAlerts.any((existingAlert) => 
-      _isIdenticalAlert(existingAlert, safeAlert)
+    final isDuplicate = _activeAlerts.any(
+      (existingAlert) => _isIdenticalAlert(existingAlert, safeAlert),
     );
 
     if (isDuplicate) {
@@ -536,13 +756,52 @@ class _MyHomePageState extends State<MyHomePage> {
     setState(() {
       _activeAlerts.add(safeAlert);
     });
+
+    // Show a notification for the new alert
+    _showAlertNotification(safeAlert);
+  }
+
+  // Show a notification for an alert
+  Future<void> _showAlertNotification(Map<String, dynamic> alert) async {
+    // Get alert details
+    final alertType = alert['alert_type'];
+    final message = alert['message'] ?? 'Alert received';
+
+    // Configure notification details
+    const AndroidNotificationDetails androidDetails =
+        AndroidNotificationDetails(
+          'alerts_channel',
+          'Alerts Channel',
+          channelDescription: 'Channel for important flight alerts',
+          importance: Importance.max,
+          priority: Priority.high,
+          // Use default sound and vibration
+          playSound: true,
+          enableVibration: true,
+        );
+
+    const NotificationDetails platformDetails = NotificationDetails(
+      android: androidDetails,
+    );
+
+    // Show the notification
+    await flutterLocalNotificationsPlugin.show(
+      // Use timestamp as unique ID to avoid overwriting
+      DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      'ALERT: ${capitalizeFirstLetter(alertType)}',
+      message,
+      platformDetails,
+    );
   }
 
   // Check if two alert objects are identical in their key properties
-  bool _isIdenticalAlert(Map<String, dynamic> alert1, Map<String, dynamic> alert2) {
+  bool _isIdenticalAlert(
+    Map<String, dynamic> alert1,
+    Map<String, dynamic> alert2,
+  ) {
     return alert1['alert_type'] == alert2['alert_type'] &&
-           alert1['timestamp'] == alert2['timestamp'] &&
-           alert1['message'] == alert2['message'];
+        alert1['timestamp'] == alert2['timestamp'] &&
+        alert1['message'] == alert2['message'];
   }
 
   // Show alert details dialog
@@ -577,6 +836,20 @@ class _MyHomePageState extends State<MyHomePage> {
               ],
             ),
             actions: [
+              TextButton(
+                onPressed: () {
+                  setState(() {
+                    _activeAlerts.removeWhere(
+                      (a) =>
+                          a['alert_type'] == alert['alert_type'] &&
+                          a['timestamp'] == alert['timestamp'],
+                    );
+                  });
+                  Navigator.pop(context);
+                },
+                style: TextButton.styleFrom(foregroundColor: Colors.red),
+                child: const Text('Dismiss'),
+              ),
               TextButton(
                 onPressed: () => Navigator.pop(context),
                 child: const Text('Close'),
@@ -622,19 +895,14 @@ class _MyHomePageState extends State<MyHomePage> {
         title: Text(widget.title),
         actions: [
           IconButton(
-            icon: const Icon(Icons.settings),
-            onPressed: _showServerSettings,
-            tooltip: 'Server Settings',
-          ),
-          IconButton(
-            icon: const Icon(Icons.list),
-            onPressed: _showSavedFlights,
-            tooltip: 'Saved Flights',
-          ),
-          IconButton(
             icon: const Icon(Icons.bluetooth),
             onPressed: _navigateToBluetoothView,
             tooltip: 'Bluetooth Mesh',
+          ),
+          IconButton(
+            icon: const Icon(Icons.settings),
+            onPressed: _showServerSettings,
+            tooltip: 'Server Settings',
           ),
         ],
       ),
@@ -680,6 +948,9 @@ class _MyHomePageState extends State<MyHomePage> {
                     decoration: const InputDecoration(
                       labelText: 'Enter Flight Number (e.g., VY2375)',
                     ),
+                    onChanged: (value) {
+                      setState(() {});
+                    },
                   ),
                 ),
                 const SizedBox(width: 16),
@@ -690,23 +961,27 @@ class _MyHomePageState extends State<MyHomePage> {
               ],
             ),
             const SizedBox(height: 8),
-            Center(
-              child: TextButton.icon(
-                onPressed: () {
-                  _flightNumberController.clear();
-                  _fetchFlightInfo();
-                },
-                icon: const Icon(Icons.list),
-                label: const Text('View All Flights'),
+            if (_flightNumberController.text.isNotEmpty)
+              Center(
+                child: TextButton.icon(
+                  onPressed: () {
+                    _flightNumberController.clear();
+                    _fetchFlightInfo();
+                  },
+                  icon: const Icon(Icons.list),
+                  label: const Text('View All Flights'),
+                ),
               ),
-            ),
             const SizedBox(height: 16),
 
             // Flight info display
             if (_isLoading)
               const Center(child: CircularProgressIndicator())
             else if (_errorMessage.isNotEmpty)
-              SelectableText(_errorMessage, style: TextStyle(color: Colors.red))
+              SelectableText(
+                _errorMessage,
+                style: const TextStyle(color: Colors.red),
+              )
             else if (_flightInfo != null)
               FlightCard(flight: _flightInfo!, isExpanded: true)
             else if (_savedFlights.isNotEmpty)
@@ -721,9 +996,9 @@ class _MyHomePageState extends State<MyHomePage> {
                     const SizedBox(height: 8),
                     Expanded(
                       child: ListView.builder(
-                        itemCount: _savedFlights.length,
+                        itemCount: _getSortedFlights().length,
                         itemBuilder: (context, index) {
-                          final flight = _savedFlights[index];
+                          final flight = _getSortedFlights()[index];
                           return FlightCard(
                             flight: flight,
                             onTap: () {
@@ -912,6 +1187,7 @@ class _MyHomePageState extends State<MyHomePage> {
     );
   }
 
+
   void _showSavedFlights() {
     showDialog(
       context: context,
@@ -957,14 +1233,17 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   
+
   void _navigateToBluetoothView() {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => BluetoothView(
-          savedFlights: _savedFlights,
-          onSourceDeviceToggled: _handleSourceDeviceToggled,
-        ),
+        builder:
+            (context) => BluetoothView(
+              savedFlights: _savedFlights,
+              onSourceDeviceToggled: _handleSourceDeviceToggled,
+              key: _bluetoothViewKey,
+            ),
       ),
     );
   }
@@ -1038,3 +1317,4 @@ class _FloatingPlusState extends State<_FloatingPlus>
   
 
 }
+

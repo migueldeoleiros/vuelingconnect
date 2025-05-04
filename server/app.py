@@ -55,11 +55,12 @@ def generate_random_alert():
 async def get_flight_status():
     messages = []
     for _ in range(1):
-        msg_type = random.choice(list(MsgType))
-        if msg_type == MsgType.flightStatus:
-            messages.append(generate_random_flight_info())
-        else:
-            messages.append(generate_random_alert())
+        # Uncomment to generate alerts
+        # msg_type = random.choice(list(MsgType))
+        # if msg_type == MsgType.flightStatus:
+        messages.append(generate_random_flight_info())
+        # else:
+        #     messages.append(generate_random_alert())
     
     return [
         {
