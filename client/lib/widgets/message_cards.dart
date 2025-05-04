@@ -42,7 +42,6 @@ class FlightCard extends StatelessWidget {
     final flightStatus = flight['flight_status'] ?? 'unknown';
     final timestamp = flight['timestamp'] ?? DateTime.now().toIso8601String();
     final source = flight['source'] ?? 'api';
-    final isBluetoothSource = source == 'bluetooth';
     final String? eta = flight['eta']; // ETA may not be available
     final String? destination =
         flight['destination']; // Destination may not be available
@@ -200,16 +199,6 @@ class FlightCard extends StatelessWidget {
                       },
                     ),
                     const SizedBox(width: 8),
-                    // BLE indicator
-                    // if (isBluetoothSource && !isExpanded)
-                    //   const Text(
-                    //     'BLE',
-                    //     style: TextStyle(
-                    //       color: Colors.blue,
-                    //       fontWeight: FontWeight.bold,
-                    //       fontSize: 12,
-                    //     ),
-                    //   ),
                   ],
                 ),
               ],
@@ -234,8 +223,16 @@ class FlightCard extends StatelessWidget {
 class AlertCard extends StatelessWidget {
   final Map<String, dynamic> alert;
   final VoidCallback? onTap;
+  final bool showMoreIndicator;
+  final int moreCount;
 
-  const AlertCard({super.key, required this.alert, this.onTap});
+  const AlertCard({
+    super.key,
+    required this.alert,
+    this.onTap,
+    this.showMoreIndicator = false,
+    this.moreCount = 0,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -244,7 +241,6 @@ class AlertCard extends StatelessWidget {
     final message = alert['message'] ?? 'No message available';
     final timestamp = alert['timestamp'] ?? DateTime.now().toIso8601String();
     final source = alert['source'] ?? 'api';
-    final isBluetoothSource = source == 'bluetooth';
 
     return GestureDetector(
       onTap: onTap ?? () => _showAlertDialog(context, alert),
@@ -259,26 +255,41 @@ class AlertCard extends StatelessWidget {
             children: [
               // Alert header
               Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Icon(
-                    getAlertIcon(alertType),
-                    color: getAlertColor(alertType),
+                  Row(
+                    children: [
+                      Icon(
+                        getAlertIcon(alertType),
+                        color: getAlertColor(alertType),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        capitalizeFirstLetter(alertType),
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: 8),
-                  Text(
-                    capitalizeFirstLetter(alertType),
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
-                    ),
-                  ),
-                  if (isBluetoothSource)
-                    const Padding(
-                      padding: EdgeInsets.only(left: 8.0),
-                      child: Icon(
-                        Icons.bluetooth,
-                        color: Colors.blue,
-                        size: 16,
+                  if (showMoreIndicator)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.red.withOpacity(0.7),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        '+$moreCount more',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
                 ],
@@ -310,15 +321,6 @@ class AlertCard extends StatelessWidget {
                       ),
                     ],
                   ),
-                  if (isBluetoothSource)
-                    const Text(
-                      'BLE',
-                      style: TextStyle(
-                        color: Colors.blue,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 12,
-                      ),
-                    ),
                 ],
               ),
             ],
@@ -334,7 +336,6 @@ class AlertCard extends StatelessWidget {
     final message = alert['message'] ?? 'No message available';
     final timestamp = alert['timestamp'] ?? DateTime.now().toIso8601String();
     final source = alert['source'] ?? 'api';
-    final isBluetoothSource = source == 'bluetooth';
 
     showDialog(
       context: context,
@@ -345,11 +346,6 @@ class AlertCard extends StatelessWidget {
                 Icon(getAlertIcon(alertType), color: getAlertColor(alertType)),
                 const SizedBox(width: 8),
                 const Text('Alert'),
-                if (isBluetoothSource)
-                  const Padding(
-                    padding: EdgeInsets.only(left: 8.0),
-                    child: Icon(Icons.bluetooth, color: Colors.blue, size: 16),
-                  ),
               ],
             ),
             content: Column(
@@ -375,23 +371,6 @@ class AlertCard extends StatelessWidget {
                     ),
                   ],
                 ),
-                if (isBluetoothSource)
-                  const Padding(
-                    padding: EdgeInsets.only(top: 8.0),
-                    child: Row(
-                      children: [
-                        Icon(Icons.bluetooth, size: 16, color: Colors.blue),
-                        SizedBox(width: 4),
-                        Text(
-                          'Received via Bluetooth',
-                          style: TextStyle(
-                            color: Colors.blue,
-                            fontStyle: FontStyle.italic,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
               ],
             ),
             actions: [

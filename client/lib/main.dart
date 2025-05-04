@@ -379,7 +379,7 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   Future<void> _fetchFlightInfo() async {
-    final flightNumber = _flightNumberController.text.trim();
+    final searchQuery = _flightNumberController.text.trim().toLowerCase();
 
     setState(() {
       _isLoading = true;
@@ -387,23 +387,35 @@ class _MyHomePageState extends State<MyHomePage> {
       _errorMessage = '';
     });
 
-    // If a flight number was specified, filter the existing flights
-    if (flightNumber.isNotEmpty) {
-      // Find the requested flight in saved flights
-      final matchingFlight = _savedFlights.firstWhere(
-        (flight) => flight['flight_number'] == flightNumber,
-        orElse: () => <String, dynamic>{},
-      );
+    // If a search query was specified, filter the existing flights
+    if (searchQuery.isNotEmpty) {
+      // Search in saved flights for matching flight numbers or destinations
+      final matchingFlights =
+          _savedFlights.where((flight) {
+            final flightNumber = flight['flight_number']?.toLowerCase() ?? '';
+            final destination = flight['destination']?.toLowerCase() ?? '';
+
+            // Match either flight number or destination that contains the search query
+            return flightNumber.contains(searchQuery) ||
+                destination.contains(searchQuery);
+          }).toList();
 
       setState(() {
-        _flightInfo = matchingFlight.isEmpty ? null : matchingFlight;
-        if (_flightInfo == null) {
-          _errorMessage = 'Flight not found';
+        if (matchingFlights.isEmpty) {
+          _errorMessage = 'No matching flights found';
+          _flightInfo = null;
+        } else if (matchingFlights.length == 1) {
+          // If exactly one match, show that flight
+          _flightInfo = matchingFlights.first;
+        } else {
+          // Multiple matches, don't set _flightInfo
+          // so the list view will show all matching flights
+          _flightInfo = null;
         }
         _isLoading = false;
       });
     } else {
-      // No flight number specified, just show all flights
+      // No search query specified, just show all flights
       setState(() {
         _flightInfo = null;
         _isLoading = false;
@@ -786,8 +798,26 @@ class _MyHomePageState extends State<MyHomePage> {
 
   // Get flights sorted by timestamp (most recent first)
   List<Map<String, dynamic>> _getSortedFlights() {
-    final sortedFlights = List<Map<String, dynamic>>.from(_savedFlights);
-    sortedFlights.sort((a, b) {
+    List<Map<String, dynamic>> flights = List<Map<String, dynamic>>.from(
+      _savedFlights,
+    );
+
+    // If there's a search query and we're showing multiple results, filter the list
+    final searchQuery = _flightNumberController.text.trim().toLowerCase();
+    if (searchQuery.isNotEmpty &&
+        _flightInfo == null &&
+        _errorMessage.isEmpty) {
+      flights =
+          flights.where((flight) {
+            final flightNumber = flight['flight_number']?.toLowerCase() ?? '';
+            final destination = flight['destination']?.toLowerCase() ?? '';
+            return flightNumber.contains(searchQuery) ||
+                destination.contains(searchQuery);
+          }).toList();
+    }
+
+    // Sort by timestamp (newest first)
+    flights.sort((a, b) {
       try {
         final DateTime timeA = DateTime.parse(a['timestamp'] ?? '');
         final DateTime timeB = DateTime.parse(b['timestamp'] ?? '');
@@ -797,7 +827,8 @@ class _MyHomePageState extends State<MyHomePage> {
         return 0;
       }
     });
-    return sortedFlights;
+
+    return flights;
   }
 
   // Check if two flight objects are identical in their key properties
@@ -1046,50 +1077,53 @@ class _MyHomePageState extends State<MyHomePage> {
           children: <Widget>[
             // Alert section if there are active alerts
             if (_activeAlerts.isNotEmpty) ...[
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'Active Alerts',
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                  TextButton(
-                    onPressed: () => _showAlertsDialog(),
-                    child: const Text('View All'),
-                  ),
-                ],
+              GestureDetector(
+                onTap: () => _showAlertsDialog(),
+                child: Row(
+                  children: [
+                    Text(
+                      'Active Alerts (${_activeAlerts.length})',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(width: 4),
+                    const Icon(Icons.arrow_forward_ios, size: 14),
+                  ],
+                ),
               ),
               const SizedBox(height: 8),
               AlertCard(
                 alert: _activeAlerts.last,
-                onTap: () => _showAlertDialog(_activeAlerts.last),
+                onTap:
+                    () =>
+                        _activeAlerts.length > 1
+                            ? _showAlertsDialog()
+                            : _showAlertDialog(_activeAlerts.last),
+                showMoreIndicator: _activeAlerts.length > 1,
+                moreCount: _activeAlerts.length - 1,
               ),
               const SizedBox(height: 16),
             ],
 
             // Flight tracker section
-            Text(
-              'Flight Tracker',
-              style: Theme.of(context).textTheme.headlineSmall,
-            ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 8),
             Row(
               children: [
                 Expanded(
                   child: TextField(
                     controller: _flightNumberController,
-                    decoration: const InputDecoration(
-                      labelText: 'Enter Flight Number (e.g., VY2375)',
+                    decoration: InputDecoration(
+                      labelText: 'Search flight number or destination',
+                      suffixIcon: IconButton(
+                        icon: const Icon(Icons.search),
+                        onPressed: _fetchFlightInfo,
+                        tooltip: 'Search',
+                      ),
                     ),
                     onChanged: (value) {
                       setState(() {});
                     },
+                    onSubmitted: (_) => _fetchFlightInfo(),
                   ),
-                ),
-                const SizedBox(width: 16),
-                ElevatedButton(
-                  onPressed: _fetchFlightInfo,
-                  child: const Text('Filter Flights'),
                 ),
               ],
             ),
@@ -1101,8 +1135,8 @@ class _MyHomePageState extends State<MyHomePage> {
                     _flightNumberController.clear();
                     _fetchFlightInfo();
                   },
-                  icon: const Icon(Icons.list),
-                  label: const Text('View All Flights'),
+                  icon: const Icon(Icons.clear),
+                  label: const Text('Clear Search'),
                 ),
               ),
             const SizedBox(height: 16),
@@ -1123,7 +1157,10 @@ class _MyHomePageState extends State<MyHomePage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'All Flights',
+                      _flightNumberController.text.isNotEmpty &&
+                              _errorMessage.isEmpty
+                          ? 'Search Results'
+                          : 'All Flights',
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
                     const SizedBox(height: 8),
