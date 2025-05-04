@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../theme.dart';
 import '../utils/string_utils.dart';
 import '../utils/date_utils.dart';
+import '../services/subscription_service.dart';
 
 class FlightCard extends StatelessWidget {
   final Map<String, dynamic> flight;
@@ -45,6 +47,10 @@ class FlightCard extends StatelessWidget {
     final String? destination =
         flight['destination']; // Destination may not be available
 
+    // Get subscription service
+    final subscriptionService = Provider.of<SubscriptionService>(context);
+    final isSubscribed = subscriptionService.isSubscribed(flightNumber);
+
     final cardContent = Card(
       elevation: 4,
       margin: isExpanded ? EdgeInsets.zero : const EdgeInsets.only(bottom: 12),
@@ -71,6 +77,16 @@ class FlightCard extends StatelessWidget {
                         fontWeight: FontWeight.bold,
                       ),
                     ),
+                    // Add subscription indicator
+                    if (isSubscribed)
+                      Padding(
+                        padding: const EdgeInsets.only(left: 4.0),
+                        child: Icon(
+                          Icons.notifications_active,
+                          color: Colors.amber,
+                          size: 16,
+                        ),
+                      ),
                   ],
                 ),
                 Row(
@@ -91,15 +107,6 @@ class FlightCard extends StatelessWidget {
                           const SizedBox(width: 8),
                         ],
                       ),
-                    // if (isBluetoothSource)
-                    //   const Tooltip(
-                    //     message: 'Received via Bluetooth',
-                    //     child: Icon(
-                    //       Icons.bluetooth,
-                    //       color: Colors.blue,
-                    //       size: 20,
-                    //     ),
-                    //   ),
                   ],
                 ),
               ],
@@ -149,7 +156,7 @@ class FlightCard extends StatelessWidget {
             ],
 
             const SizedBox(height: 6),
-            // Last updated info
+            // Last updated info and subscription button
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -165,15 +172,46 @@ class FlightCard extends StatelessWidget {
                     ),
                   ],
                 ),
-                // if (isBluetoothSource && !isExpanded)
-                //   const Text(
-                //     'BLE',
-                //     style: TextStyle(
-                //       color: Colors.blue,
-                //       fontWeight: FontWeight.bold,
-                //       fontSize: 12,
-                //     ),
-                //   ),
+                Row(
+                  children: [
+                    // Subscription button
+                    IconButton(
+                      icon: Icon(
+                        isSubscribed ? Icons.notifications_off : Icons.notifications_none,
+                        size: 20,
+                        color: isSubscribed ? Colors.amber : Colors.white70,
+                      ),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                      tooltip: isSubscribed ? 'Unsubscribe' : 'Subscribe to updates',
+                      onPressed: () {
+                        if (isSubscribed) {
+                          subscriptionService.unsubscribeFromFlight(flightNumber);
+                        } else {
+                          subscriptionService.subscribeToFlight(flightNumber);
+                          // Show confirmation
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Subscribed to Flight $flightNumber updates'),
+                              duration: const Duration(seconds: 2),
+                            ),
+                          );
+                        }
+                      },
+                    ),
+                    const SizedBox(width: 8),
+                    // BLE indicator
+                    // if (isBluetoothSource && !isExpanded)
+                    //   const Text(
+                    //     'BLE',
+                    //     style: TextStyle(
+                    //       color: Colors.blue,
+                    //       fontWeight: FontWeight.bold,
+                    //       fontSize: 12,
+                    //     ),
+                    //   ),
+                  ],
+                ),
               ],
             ),
           ],

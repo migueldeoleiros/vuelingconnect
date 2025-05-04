@@ -20,6 +20,7 @@ import 'providers/bluetooth_state_provider.dart';
 import 'services/ble_central_service.dart';
 import 'services/ble_peripheral_service.dart';
 import 'services/message_store.dart';
+import 'services/subscription_service.dart';
 import 'theme.dart';
 import 'utils/date_utils.dart';
 import 'utils/string_utils.dart';
@@ -38,25 +39,17 @@ const MethodChannel platform = MethodChannel(
 const String portName = 'notification_send_port';
 
 void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
   // Set up logging
-  // testBleMessage();
   Logger.root.level = Level.ALL;
   Logger.root.onRecord.listen((record) {
     print('${record.level.name}: ${record.time}: ${record.message}');
-    if (record.error != null) {
-      print('Error: ${record.error}\nStack trace: ${record.stackTrace}');
-    }
   });
 
-  // Ensure Flutter is initialized before using platform channels
-  WidgetsFlutterBinding.ensureInitialized();
-
-  await Permission.notification.request();
-
-  // Request permissions on startup for Android
-  if (Platform.isAndroid) {
-    await _requestBluetoothPermissions();
-  }
+  // Initialize notifications
+  final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
+      FlutterLocalNotificationsPlugin();
 
   const AndroidInitializationSettings initializationSettingsAndroid =
       AndroidInitializationSettings('@mipmap/ic_launcher');
@@ -67,37 +60,59 @@ void main() async {
 
   await flutterLocalNotificationsPlugin.initialize(
     initializationSettings,
-    onDidReceiveNotificationResponse: selectNotificationStream.add,
+    onDidReceiveNotificationResponse: (NotificationResponse response) {
+      print('Notification clicked: ${response.payload}');
+    },
     onDidReceiveBackgroundNotificationResponse: null,
   );
 
-  runApp(const MyApp());
+  // Request permissions on startup for Android
+  if (Platform.isAndroid) {
+    await _requestBluetoothPermissions();
+  }
+
+  // Create subscription service
+  final subscriptionService = SubscriptionService();
+  
+  // Load saved subscriptions
+  await subscriptionService.loadSubscriptions();
+
+  runApp(
+    MultiProvider(
+      providers: [
+        Provider<BleCentralService>(
+          create: (_) => BleCentralService(),
+          dispose: (_, service) => service.dispose(),
+        ),
+        Provider<BlePeripheralService>(create: (_) => BlePeripheralService()),
+        ChangeNotifierProvider(create: (_) => BluetoothStateProvider()),
+        ProxyProvider<BlePeripheralService, MessageStore>(
+          create: (context) => MessageStore(
+            Provider.of<BlePeripheralService>(context, listen: false),
+          ),
+          update: (_, peripheralService, previous) =>
+              previous ?? MessageStore(peripheralService),
+          dispose: (_, store) => store.dispose(),
+        ),
+        // Add the subscription service provider
+        ChangeNotifierProvider<SubscriptionService>.value(value: subscriptionService),
+      ],
+      child: const MyApp(),
+    ),
+  );
 }
 
 // Request Bluetooth permissions required for Android 12+
 Future<void> _requestBluetoothPermissions() async {
-  // Request all required permissions
-  Map<Permission, PermissionStatus> statuses =
-      await [
-        Permission.bluetooth,
-        Permission.bluetoothScan,
-        Permission.bluetoothConnect,
-        Permission.bluetoothAdvertise,
-        Permission.location,
-      ].request();
-
-  // Log the permission statuses
-  statuses.forEach((permission, status) {
-    print('$permission: $status');
-  });
-
-  // Try to enable Bluetooth if it's not already on
-  try {
-    if (!await FlutterBluePlus.isOn) {
-      await FlutterBluePlus.turnOn();
-    }
-  } catch (e) {
-    print('Error turning on Bluetooth: $e');
+  if (Platform.isAndroid) {
+    // Request location permissions (required for BLE scanning on Android)
+    await Permission.location.request();
+    
+    // Request Bluetooth permissions
+    await Permission.bluetooth.request();
+    await Permission.bluetoothScan.request();
+    await Permission.bluetoothConnect.request();
+    await Permission.bluetoothAdvertise.request();
   }
 }
 
@@ -124,32 +139,12 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MultiProvider(
-      providers: [
-        Provider<BleCentralService>(
-          create: (_) => BleCentralService(),
-          dispose: (_, service) => service.dispose(),
-        ),
-        Provider<BlePeripheralService>(create: (_) => BlePeripheralService()),
-        ChangeNotifierProvider(create: (_) => BluetoothStateProvider()),
-        ProxyProvider<BlePeripheralService, MessageStore>(
-          create:
-              (context) => MessageStore(
-                Provider.of<BlePeripheralService>(context, listen: false),
-              ),
-          update:
-              (_, peripheralService, previous) =>
-                  previous ?? MessageStore(peripheralService),
-          dispose: (_, store) => store.dispose(),
-        ),
-      ],
-      child: MaterialApp(
-        title: 'Vueling Connect',
-        theme: getLightTheme(),
-        darkTheme: getDarkTheme(),
-        themeMode: ThemeMode.dark, // Force dark mode
-        home: const MyHomePage(title: 'Vueling Connect'),
-      ),
+    return MaterialApp(
+      title: 'Vueling Connect',
+      theme: getLightTheme(),
+      darkTheme: getDarkTheme(),
+      themeMode: ThemeMode.dark, // Force dark mode
+      home: const MyHomePage(title: 'Vueling Connect'),
     );
   }
 }
@@ -191,29 +186,36 @@ class _MyHomePageState extends State<MyHomePage> {
 
     _pointTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
       if (mounted) {
-        setState(() {
-          _points += 10;
-          _isScaled = true;
-          _showFloatingPlus = true;
-        });
-
-        _savePoints();
-
-        Future.delayed(const Duration(milliseconds: 300), () {
-          if (mounted) {
-            setState(() {
-              _isScaled = false;
-            });
+          // Only add points if auto-relay is enabled (broadcasting)
+          final bluetoothState = Provider.of<BluetoothStateProvider>(context, listen: false);
+          if (bluetoothState.isAutoRelayEnabled) {
+          setState(() {
+            _points += 5;
+            _isScaled = true;
+            _showFloatingPlus = true;
+          });
+            
+            // Save the updated points
+          _savePoints();
+            
+            // Reset the animation after a delay
+          Future.delayed(const Duration(milliseconds: 500), () {
+            if (mounted) {
+              setState(() {
+                _isScaled = false;
+              });
+            }
+          });
+            
+            // Hide the plus after a delay
+          Future.delayed(const Duration(seconds: 2), () {
+            if (mounted) {
+              setState(() {
+                _showFloatingPlus = false;
+              });
+            }
+          });
           }
-        });
-
-        Future.delayed(const Duration(milliseconds: 800), () {
-          if (mounted) {
-            setState(() {
-              _showFloatingPlus = false;
-            });
-          }
-        });
       }
     });
 
@@ -308,6 +310,12 @@ class _MyHomePageState extends State<MyHomePage> {
           }
 
           _updateFlightInfo(flight);
+
+          // Check if this flight is subscribed
+          final subscriptionService = Provider.of<SubscriptionService>(context, listen: false);
+          if (subscriptionService.isSubscribed(bleMessage.flightNumber!)) {
+            _showFlightUpdateNotification(flight);
+          }
         } else if (bleMessage.msgType == MsgType.alert &&
             bleMessage.alertMessage != null) {
           // Convert BLE alert message to our format
@@ -493,6 +501,12 @@ class _MyHomePageState extends State<MyHomePage> {
               if (bluetoothViewState != null) {
                 bluetoothViewState.addApiMessage(flight);
               }
+
+              // Check if this flight is subscribed
+              final subscriptionService = Provider.of<SubscriptionService>(context, listen: false);
+              if (subscriptionService.isSubscribed(msg['flight_number'])) {
+                _showFlightUpdateNotification(flight);
+              }
             }
           } else if (msgType == 'alert') {
             // Only process if we have the minimum required fields
@@ -650,46 +664,45 @@ class _MyHomePageState extends State<MyHomePage> {
 
   // Update existing flight or add new one if it doesn't exist
   void _updateFlightInfo(Map<String, dynamic> newFlight) {
-    // Validate that we have at least a flight number
+    // Make sure we have the minimum required fields
     final flightNumber = newFlight['flight_number'];
     if (flightNumber == null) {
-      print('Cannot update flight info: Missing flight number');
+      print('Cannot update flight: Missing flight number');
       return;
     }
 
+    // Ensure all required fields have values
+    final updatedFlight = Map<String, dynamic>.from(newFlight);
+    updatedFlight['flight_status'] = updatedFlight['flight_status'] ?? 'unknown';
+    updatedFlight['timestamp'] = updatedFlight['timestamp'] ??
+        DateTime.now().toIso8601String();
+    updatedFlight['flight_message'] = updatedFlight['flight_message'] ??
+        _getFlightStatusMessage(updatedFlight['flight_status']);
+
+    // Check if we already have this flight
     final index = _savedFlights.indexWhere(
       (flight) => flight['flight_number'] == flightNumber,
     );
 
-    // Make sure all required fields exist with defaults if needed
-    final updatedFlight = {
-      'flight_number': flightNumber,
-      'flight_status': newFlight['flight_status'] ?? 'unknown',
-      'timestamp': newFlight['timestamp'] ?? DateTime.now().toIso8601String(),
-      'flight_message':
-          newFlight['flight_message'] ??
-          _getFlightStatusMessage(newFlight['flight_status']),
-      'source':
-          newFlight['source'] ?? 'api', // Default to 'api' if not specified
-    };
+    // Flag to track if this is a meaningful update that should trigger a notification
+    bool isSignificantUpdate = false;
+    bool isNewFlight = false;
 
-    // Include destination if available
-    if (newFlight['destination'] != null) {
-      updatedFlight['destination'] = newFlight['destination'];
-    }
-
-    // Include ETA if available
-    if (newFlight['eta'] != null) {
-      updatedFlight['eta'] = newFlight['eta'];
-    }
-
-    if (index != -1) {
-      // Flight exists, check if it's identical to avoid duplicates
+    if (index >= 0) {
+      // Existing flight, update it
       final existingFlight = _savedFlights[index];
+
+      // Check if status has changed - this is significant
+      if (existingFlight['flight_status'] != updatedFlight['flight_status']) {
+        isSignificantUpdate = true;
+      }
 
       // If existing flight has an ETA and new one doesn't, preserve the existing ETA
       if (existingFlight['eta'] != null && updatedFlight['eta'] == null) {
         updatedFlight['eta'] = existingFlight['eta'];
+      } else if (existingFlight['eta'] != updatedFlight['eta'] && updatedFlight['eta'] != null) {
+        // ETA has changed - this is significant
+        isSignificantUpdate = true;
       }
 
       // If existing flight has a destination and new one doesn't, preserve the existing destination
@@ -733,6 +746,7 @@ class _MyHomePageState extends State<MyHomePage> {
               _flightInfo = _savedFlights[index];
             }
           });
+          isSignificantUpdate = false; // Not a significant update if we're using the existing data
         }
       } catch (e) {
         // If there's an issue with timestamp parsing, just update with new info
@@ -755,9 +769,19 @@ class _MyHomePageState extends State<MyHomePage> {
         // Don't automatically set _flightInfo to the new flight
         // This allows the "All Flights" view to remain visible
       });
+      isNewFlight = true;
+      isSignificantUpdate = true; // New flight is always significant
     }
 
     _saveFlights();
+    
+    // Check if this flight is subscribed and if the update is significant
+    if (isSignificantUpdate || isNewFlight) {
+      final subscriptionService = Provider.of<SubscriptionService>(context, listen: false);
+      if (subscriptionService.isSubscribed(flightNumber)) {
+        _showFlightUpdateNotification(updatedFlight);
+      }
+    }
   }
 
   // Get flights sorted by timestamp (most recent first)
@@ -946,6 +970,54 @@ class _MyHomePageState extends State<MyHomePage> {
   bool _isScaled = false;
   bool _showFloatingPlus = false;
   late Timer _pointTimer;
+
+  // Show a notification for a flight update
+  Future<void> _showFlightUpdateNotification(Map<String, dynamic> flight) async {
+    // Get flight details
+    final flightNumber = flight['flight_number'] ?? 'Unknown';
+    final status = flight['flight_status'] ?? 'Unknown';
+    final destination = flight['destination'] ?? '';
+    
+    // Create notification title and body
+    final title = 'Flight $flightNumber Update';
+    String body = 'Status: ${capitalizeFirstLetter(status)}';
+    if (destination.isNotEmpty) {
+      body += ' - Destination: $destination';
+    }
+    if (flight['eta'] != null) {
+      body += ' - ETA: ${formatDateTime(flight['eta'].toString())}';
+    }
+
+    // Configure notification details
+    const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+      'flight_updates_channel',
+      'Flight Updates Channel',
+      channelDescription: 'Channel for flight status updates',
+      importance: Importance.high,
+      priority: Priority.high,
+      playSound: true,
+      enableVibration: true,
+    );
+
+    const NotificationDetails platformDetails = NotificationDetails(
+      android: androidDetails,
+    );
+
+    // Show the notification with a unique ID based on flight number and timestamp
+    await flutterLocalNotificationsPlugin.show(
+      // Use flight number and current time for a unique ID
+      int.parse(flightNumber.replaceAll(RegExp(r'[^0-9]'), '')) + 
+          (DateTime.now().millisecondsSinceEpoch % 10000),
+      title,
+      body,
+      platformDetails,
+    );
+    
+    // Play notification sound
+    _playSound('assets/sounds/notification.mp3');
+    
+    print('Sent notification for subscribed flight: $flightNumber');
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1475,7 +1547,7 @@ class _FloatingPlusState extends State<_FloatingPlus>
         );
       },
       child: const Text(
-        '+10',
+        '+5',
         style: TextStyle(
           fontSize: 30,
           color: Colors.yellow,
