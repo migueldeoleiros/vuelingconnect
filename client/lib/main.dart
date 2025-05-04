@@ -19,15 +19,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'providers/bluetooth_state_provider.dart';
 import 'services/ble_central_service.dart';
 import 'services/ble_peripheral_service.dart';
-import 'package:prueba_app/views/points_view.dart';
 import 'services/message_store.dart';
 import 'theme.dart';
 import 'utils/date_utils.dart';
 import 'utils/string_utils.dart';
 import 'views/bluetooth_view.dart';
 import 'widgets/message_cards.dart';
-
-import 'package:rename_app/rename_app.dart';
 
 final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
     FlutterLocalNotificationsPlugin();
@@ -39,7 +36,6 @@ const MethodChannel platform = MethodChannel(
 );
 
 const String portName = 'notification_send_port';
-
 
 void main() async {
   // Set up logging
@@ -191,35 +187,35 @@ class _MyHomePageState extends State<MyHomePage> {
   @override
   void initState() {
     super.initState();
-      _loadPoints();
+    _loadPoints();
 
-     _pointTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
-        if (mounted) {
-          setState(() {
-            _points += 10;
-            _isScaled = true;
-            _showFloatingPlus = true;
-          });
+    _pointTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
+      if (mounted) {
+        setState(() {
+          _points += 10;
+          _isScaled = true;
+          _showFloatingPlus = true;
+        });
 
-          _savePoints();
+        _savePoints();
 
-          Future.delayed(const Duration(milliseconds: 300), () {
-            if (mounted) {
-              setState(() {
-                _isScaled = false;
-              });
-            }
-          });
+        Future.delayed(const Duration(milliseconds: 300), () {
+          if (mounted) {
+            setState(() {
+              _isScaled = false;
+            });
+          }
+        });
 
-          Future.delayed(const Duration(milliseconds: 800), () {
-            if (mounted) {
-              setState(() {
-                _showFloatingPlus = false;
-              });
-            }
-          });
-        }
-      });
+        Future.delayed(const Duration(milliseconds: 800), () {
+          if (mounted) {
+            setState(() {
+              _showFloatingPlus = false;
+            });
+          }
+        });
+      }
+    });
 
     _initBluetooth();
     _loadSavedFlights();
@@ -944,14 +940,14 @@ class _MyHomePageState extends State<MyHomePage> {
     _pointTimer.cancel();
     super.dispose();
   }
+
   int _points = 0;
   bool _isScaled = false;
   bool _showFloatingPlus = false;
   late Timer _pointTimer;
-  
+
   @override
   Widget build(BuildContext context) {
-
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Theme.of(context).colorScheme.primary,
@@ -1095,51 +1091,96 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   Widget _bottomNavigationBar() {
-      return SafeArea(
+    final bluetoothProvider = Provider.of<BluetoothStateProvider>(context);
+
+    return SafeArea(
       child: Container(
         height: 64,
         padding: const EdgeInsets.symmetric(horizontal: 16),
         child: Row(
-          mainAxisAlignment: MainAxisAlignment.end,
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(
-              '$_points pts',
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            // Bluetooth toggle button
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor:
+                    bluetoothProvider.isScanning ||
+                            bluetoothProvider.isAdvertising
+                        ? Theme.of(context).colorScheme.primary
+                        : Theme.of(context).colorScheme.surfaceContainerHighest,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(24),
+                ),
+              ),
+              onPressed: () => _toggleBluetoothFunctionality(),
+              icon: Icon(
+                bluetoothProvider.isScanning || bluetoothProvider.isAdvertising
+                    ? Icons.bluetooth_connected
+                    : Icons.bluetooth_disabled,
+                color:
+                    bluetoothProvider.isScanning ||
+                            bluetoothProvider.isAdvertising
+                        ? Colors.black
+                        : Theme.of(context).colorScheme.onSurface,
+              ),
+              label: Text(
+                bluetoothProvider.isScanning || bluetoothProvider.isAdvertising
+                    ? 'BT Active'
+                    : 'BT Inactive',
+                style: TextStyle(
+                  color:
+                      bluetoothProvider.isScanning ||
+                              bluetoothProvider.isAdvertising
+                          ? Colors.black
+                          : Theme.of(context).colorScheme.onSurface,
+                ),
+              ),
             ),
-            const SizedBox(width: 12),
-            Stack(
-              alignment: Alignment.center,
-              clipBehavior: Clip.none,
+
+            Row(
               children: [
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    shape: const CircleBorder(),
-                    backgroundColor: Colors.black,
-                    padding: const EdgeInsets.all(0),
-                  ),
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (context) => const PointsView()),
-                    );
-                  },
-                  child: AnimatedScale(
-                    scale: _isScaled ? 1.25 : 1.0,
-                    duration: const Duration(milliseconds: 450),
-                    child: const Icon(
-                      Icons.airplane_ticket,
-                      size: 64,
-                      color: Color.fromARGB(255, 255, 255, 0),
-                    ),
+                Text(
+                  '$_points pts',
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
                   ),
                 ),
+                const SizedBox(width: 12),
+                Stack(
+                  alignment: Alignment.center,
+                  clipBehavior: Clip.none,
+                  children: [
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        shape: const CircleBorder(),
+                        backgroundColor: Colors.black,
+                        padding: const EdgeInsets.all(0),
+                      ),
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const PointsView(),
+                          ),
+                        );
+                      },
+                      child: AnimatedScale(
+                        scale: _isScaled ? 1.25 : 1.0,
+                        duration: const Duration(milliseconds: 450),
+                        child: const Icon(
+                          Icons.airplane_ticket,
+                          size: 64,
+                          color: Color.fromARGB(255, 255, 255, 0),
+                        ),
+                      ),
+                    ),
 
-                // +10 flotante animado
-                if (_showFloatingPlus)
-                  const Positioned(
-                    top: -30,
-                    child: _FloatingPlus(),
-                  ),
+                    // +10 flotante animado
+                    if (_showFloatingPlus)
+                      const Positioned(top: -30, child: _FloatingPlus()),
+                  ],
+                ),
               ],
             ),
           ],
@@ -1147,6 +1188,67 @@ class _MyHomePageState extends State<MyHomePage> {
       ),
     );
   }
+
+  // Toggle both Bluetooth scanning and broadcasting
+  void _toggleBluetoothFunctionality() async {
+    final bluetoothProvider = Provider.of<BluetoothStateProvider>(
+      context,
+      listen: false,
+    );
+    final centralService = Provider.of<BleCentralService>(
+      context,
+      listen: false,
+    );
+    final peripheralService = Provider.of<BlePeripheralService>(
+      context,
+      listen: false,
+    );
+    final messageStore = Provider.of<MessageStore>(context, listen: false);
+
+    if (bluetoothProvider.isScanning || bluetoothProvider.isAdvertising) {
+      // Turn off scanning if it's on
+      if (bluetoothProvider.isScanning) {
+        await centralService.stopDiscovery();
+        bluetoothProvider.setScanning(false);
+      }
+
+      // Turn off advertising if it's on
+      if (bluetoothProvider.isAdvertising) {
+        await peripheralService.stopBroadcast();
+        bluetoothProvider.setAdvertising(false);
+        messageStore.stopAutoRelay();
+        bluetoothProvider.setAutoRelayEnabled(false);
+      }
+
+      // Show toast
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Bluetooth functionality disabled'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    } else {
+      // Turn on both scanning and advertising
+
+      // Start scanning
+      await centralService.startDiscovery();
+      bluetoothProvider.setScanning(true);
+
+      // Start advertising and auto-relay
+      messageStore.startAutoRelay();
+      bluetoothProvider.setAutoRelayEnabled(true);
+      bluetoothProvider.setAdvertising(true);
+
+      // Show toast
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Bluetooth mesh network active'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
   void _showAlertsDialog() {
     showDialog(
       context: context,
@@ -1251,7 +1353,6 @@ class _MyHomePageState extends State<MyHomePage> {
     );
   }
 
-
   void _showSavedFlights() {
     showDialog(
       context: context,
@@ -1296,8 +1397,6 @@ class _MyHomePageState extends State<MyHomePage> {
     );
   }
 
-  
-
   void _navigateToBluetoothView() {
     Navigator.push(
       context,
@@ -1311,12 +1410,10 @@ class _MyHomePageState extends State<MyHomePage> {
       ),
     );
   }
-  
-
 }
 
 class _FloatingPlus extends StatefulWidget {
-  const _FloatingPlus({Key? key}) : super(key: key);
+  const _FloatingPlus({super.key});
 
   @override
   State<_FloatingPlus> createState() => _FloatingPlusState();
@@ -1332,19 +1429,20 @@ class _FloatingPlusState extends State<_FloatingPlus>
   void initState() {
     super.initState();
 
-    
     _controller = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1200),
     );
 
-    _position = Tween<double>(begin: 0, end: -40).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeOut),
-    );
+    _position = Tween<double>(
+      begin: 0,
+      end: -40,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOut));
 
-    _opacity = Tween<double>(begin: 1.0, end: 0.0).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeOut),
-    );
+    _opacity = Tween<double>(
+      begin: 1.0,
+      end: 0.0,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOut));
 
     _controller.forward();
   }
@@ -1378,5 +1476,4 @@ class _FloatingPlusState extends State<_FloatingPlus>
       ),
     );
   }
-
 }
