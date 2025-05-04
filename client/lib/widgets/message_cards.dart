@@ -15,6 +15,24 @@ class FlightCard extends StatelessWidget {
     this.onTap,
   });
 
+  // Helper method to get appropriate icon for flight status
+  IconData _getStatusIcon(String status) {
+    switch (status.toLowerCase()) {
+      case 'scheduled':
+        return Icons.schedule;
+      case 'departed':
+        return Icons.flight_takeoff;
+      case 'arrived':
+        return Icons.flight_land;
+      case 'delayed':
+        return Icons.update;
+      case 'cancelled':
+        return Icons.cancel;
+      default:
+        return Icons.help_outline;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     // Validate required fields exist with reasonable defaults
@@ -31,62 +49,123 @@ class FlightCard extends StatelessWidget {
       elevation: 4,
       margin: isExpanded ? EdgeInsets.zero : const EdgeInsets.only(bottom: 12),
       child: Padding(
-        padding: const EdgeInsets.all(16.0),
+        padding: const EdgeInsets.all(12.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Header with flight number and bluetooth icon if applicable
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  'Flight $flightNumber',
-                  style: Theme.of(context).textTheme.titleLarge,
+                Row(
+                  children: [
+                    Icon(
+                      Icons.flight,
+                      color: Theme.of(context).colorScheme.primary,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Flight $flightNumber',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
                 ),
-                if (isBluetoothSource)
-                  const Tooltip(
-                    message: 'Received via Bluetooth',
-                    child: Icon(Icons.bluetooth, color: Colors.blue, size: 20),
-                  ),
+                Row(
+                  children: [
+                    if (destination != null)
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.location_on,
+                            size: 18,
+                            color: Colors.white70,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            destination,
+                            style: const TextStyle(color: Colors.white70),
+                          ),
+                          const SizedBox(width: 8),
+                        ],
+                      ),
+                    if (isBluetoothSource)
+                      const Tooltip(
+                        message: 'Received via Bluetooth',
+                        child: Icon(
+                          Icons.bluetooth,
+                          color: Colors.blue,
+                          size: 20,
+                        ),
+                      ),
+                  ],
+                ),
               ],
             ),
-            const SizedBox(height: 8),
-            Text(
-              'Status: ${capitalizeFirstLetter(flightStatus)}',
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                color: getStatusColor(flightStatus),
-              ),
+            const Divider(height: 16),
+
+            // Status with icon
+            Row(
+              children: [
+                Icon(
+                  _getStatusIcon(flightStatus),
+                  color: getStatusColor(flightStatus),
+                  size: 18,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  capitalizeFirstLetter(flightStatus),
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: getStatusColor(flightStatus),
+                  ),
+                ),
+              ],
             ),
-            // Show destination if available
-            if (destination != null) ...[
-              const SizedBox(height: 8),
-              Text(
-                'Destination: $destination',
-                style: const TextStyle(fontWeight: FontWeight.bold),
-              ),
-            ],
-            // Show ETA if available and status is not "arrived" or "cancelled"
+
+            // ETA with icon if available and status appropriate
             if (eta != null &&
                 flightStatus != 'arrived' &&
                 flightStatus != 'cancelled') ...[
-              const SizedBox(height: 8),
-              Text(
-                'ETA: ${formatDateTime(eta)}',
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  color: Theme.of(context).colorScheme.secondary,
-                ),
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  Icon(
+                    Icons.access_time,
+                    size: 18,
+                    color: Theme.of(context).colorScheme.secondary,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    'ETA: ${formatDateTime(eta)}',
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.secondary,
+                    ),
+                  ),
+                ],
               ),
             ],
-            const SizedBox(height: 8),
+
+            const SizedBox(height: 6),
+            // Last updated info
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  'Last Updated: ${formatDateTime(timestamp)}',
-                  style: Theme.of(context).textTheme.bodySmall,
+                Row(
+                  children: [
+                    const Icon(Icons.update, size: 14, color: Colors.white54),
+                    const SizedBox(width: 4),
+                    Text(
+                      formatDateTime(timestamp),
+                      style: Theme.of(
+                        context,
+                      ).textTheme.bodySmall?.copyWith(color: Colors.white54),
+                    ),
+                  ],
                 ),
-                if (isBluetoothSource)
+                if (isBluetoothSource && !isExpanded)
                   const Text(
                     'BLE',
                     style: TextStyle(
@@ -129,45 +208,84 @@ class AlertCard extends StatelessWidget {
     final source = alert['source'] ?? 'api';
     final isBluetoothSource = source == 'bluetooth';
 
-    return Card(
-      elevation: 4,
-      color: getAlertColor(alertType).withOpacity(0.2),
-      margin: const EdgeInsets.only(bottom: 12),
-      child: ListTile(
-        leading: Icon(getAlertIcon(alertType), color: getAlertColor(alertType)),
-        title: Row(
-          children: [
-            Text(
-              capitalizeFirstLetter(alertType),
-              style: const TextStyle(fontWeight: FontWeight.bold),
-            ),
-            if (isBluetoothSource)
-              const Padding(
-                padding: EdgeInsets.only(left: 8.0),
-                child: Icon(Icons.bluetooth, color: Colors.blue, size: 16),
+    return GestureDetector(
+      onTap: onTap ?? () => _showAlertDialog(context, alert),
+      child: Card(
+        elevation: 4,
+        color: getAlertColor(alertType).withOpacity(0.2),
+        margin: const EdgeInsets.only(bottom: 12),
+        child: Padding(
+          padding: const EdgeInsets.all(12.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Alert header
+              Row(
+                children: [
+                  Icon(
+                    getAlertIcon(alertType),
+                    color: getAlertColor(alertType),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    capitalizeFirstLetter(alertType),
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
+                  if (isBluetoothSource)
+                    const Padding(
+                      padding: EdgeInsets.only(left: 8.0),
+                      child: Icon(
+                        Icons.bluetooth,
+                        color: Colors.blue,
+                        size: 16,
+                      ),
+                    ),
+                ],
               ),
-          ],
-        ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(message),
-            if (isBluetoothSource)
-              const Text(
-                'Received via Bluetooth',
-                style: TextStyle(
-                  color: Colors.blue,
-                  fontSize: 12,
-                  fontStyle: FontStyle.italic,
-                ),
+              const Divider(height: 16),
+              // Alert message
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4.0),
+                child: Text(message, style: const TextStyle(fontSize: 14)),
               ),
-          ],
+              const SizedBox(height: 4),
+              // Timestamp and source info
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(
+                        Icons.access_time,
+                        size: 14,
+                        color: Colors.white54,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        formatDateTime(timestamp),
+                        style: Theme.of(
+                          context,
+                        ).textTheme.bodySmall?.copyWith(color: Colors.white54),
+                      ),
+                    ],
+                  ),
+                  if (isBluetoothSource)
+                    const Text(
+                      'BLE',
+                      style: TextStyle(
+                        color: Colors.blue,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          ),
         ),
-        trailing: Text(
-          formatDateTime(timestamp).split(' ')[1], // Just show time
-          style: Theme.of(context).textTheme.bodySmall,
-        ),
-        onTap: onTap ?? () => _showAlertDialog(context, alert),
       ),
     );
   }
@@ -205,19 +323,35 @@ class AlertCard extends StatelessWidget {
                   style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 8),
-                Text(
-                  'Time: ${formatDateTime(timestamp)}',
-                  style: Theme.of(context).textTheme.bodySmall,
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.access_time,
+                      size: 16,
+                      color: Colors.white70,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      formatDateTime(timestamp),
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
                 ),
                 if (isBluetoothSource)
                   const Padding(
                     padding: EdgeInsets.only(top: 8.0),
-                    child: Text(
-                      'Received via Bluetooth',
-                      style: TextStyle(
-                        color: Colors.blue,
-                        fontStyle: FontStyle.italic,
-                      ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.bluetooth, size: 16, color: Colors.blue),
+                        SizedBox(width: 4),
+                        Text(
+                          'Received via Bluetooth',
+                          style: TextStyle(
+                            color: Colors.blue,
+                            fontStyle: FontStyle.italic,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
               ],
