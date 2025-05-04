@@ -4,6 +4,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:http/http.dart' as http;
@@ -21,6 +22,18 @@ import 'services/ble_peripheral_service.dart';
 import 'services/message_store.dart';
 import 'providers/bluetooth_state_provider.dart';
 
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+
+final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
+final StreamController<NotificationResponse> selectNotificationStream =
+    StreamController<NotificationResponse>.broadcast();
+  
+
+const MethodChannel platform =
+    MethodChannel('dexterx.dev/flutter_local_notifications_example');
+
+const String portName = 'notification_send_port';
+
 void main() async {
   // Set up logging
   // testBleMessage();
@@ -35,10 +48,26 @@ void main() async {
   // Ensure Flutter is initialized before using platform channels
   WidgetsFlutterBinding.ensureInitialized();
 
+  await Permission.notification.request();
+
   // Request permissions on startup for Android
   if (Platform.isAndroid) {
     await _requestBluetoothPermissions();
   }
+
+  const AndroidInitializationSettings initializationSettingsAndroid =
+          AndroidInitializationSettings('@mipmap/ic_launcher');
+
+
+    final InitializationSettings initializationSettings = InitializationSettings(
+      android: initializationSettingsAndroid,
+    );
+
+    await flutterLocalNotificationsPlugin.initialize(
+      initializationSettings,
+      onDidReceiveNotificationResponse: selectNotificationStream.add,
+      onDidReceiveBackgroundNotificationResponse: null,
+    );
 
   runApp(const MyApp());
 }
@@ -70,8 +99,30 @@ Future<void> _requestBluetoothPermissions() async {
   }
 }
 
+
+
+
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
+
+
+  Future<void> showNotification() async {
+    const AndroidNotificationDetails androidPlatformChannelSpecifics =
+        AndroidNotificationDetails(
+      'your_channel_id', // Change this to a unique ID
+      'Local Notifications',
+    );
+    const NotificationDetails platformChannelSpecifics =
+        NotificationDetails(android: androidPlatformChannelSpecifics);
+    
+    await flutterLocalNotificationsPlugin.show(
+      0,
+      'Hello, Flutter!',
+      'This is your first local notification.',
+      platformChannelSpecifics,
+    );
+  }
+
 
   @override
   Widget build(BuildContext context) {
@@ -107,6 +158,9 @@ class MyHomePage extends StatefulWidget {
   const MyHomePage({super.key, required this.title});
   final String title;
 
+
+
+
   @override
   State<MyHomePage> createState() => _MyHomePageState();
 }
@@ -116,6 +170,32 @@ class _MyHomePageState extends State<MyHomePage> {
   StreamSubscription<Uint8List>? _bleCentralSubscription;
   Timer? _apiPollingTimer;
   final AudioPlayer _audioPlayer = AudioPlayer();
+
+    Future<void> _showNotification() async {
+    const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+      'default_channel',
+      'Default Channel',
+      channelDescription: 'Default channel for app notifications',
+      importance: Importance.max,
+      priority: Priority.high,
+    );
+
+    const NotificationDetails platformDetails = NotificationDetails(
+      android: androidDetails,
+    );
+
+    
+    
+
+      await flutterLocalNotificationsPlugin.show(
+            0,
+            'Test Notification',
+            'This is a test notification from Vueling Connect',
+            platformDetails,
+          );
+    
+  }
+
 
   // Flight tracking
   final TextEditingController _flightNumberController = TextEditingController();
@@ -676,6 +756,8 @@ class _MyHomePageState extends State<MyHomePage> {
     });
   }
 
+  
+
   // Check if two alert objects are identical in their key properties
   bool _isIdenticalAlert(
     Map<String, dynamic> alert1,
@@ -744,6 +826,15 @@ class _MyHomePageState extends State<MyHomePage> {
         foregroundColor: Colors.black,
         title: Text(widget.title),
         actions: [
+
+
+          IconButton(
+            icon: const Icon(Icons.notifications),
+            onPressed: _showNotification,
+            tooltip: 'Test Notification',
+          ),
+
+
           IconButton(
             icon: const Icon(Icons.bluetooth),
             onPressed: _navigateToBluetoothView,
