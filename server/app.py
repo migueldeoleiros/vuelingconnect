@@ -24,23 +24,25 @@ class AlertType(Enum):
     fire = 3
 
 class BleMessage:
-    def __init__(self, msg_type, flight_number=None, status=None, alert_type=None, timestamp=None, eta=None):
+    def __init__(self, msg_type, flight_number=None, status=None, alert_type=None, timestamp=None, eta=None, destination=None):
         self.msg_type = msg_type
         self.flight_number = flight_number
         self.status = status
         self.alert_type = alert_type
         self.timestamp = timestamp or int(time.time())
         self.eta = eta
+        self.destination = destination
 
     @classmethod
-    def flight_status(cls, flight_number, status, timestamp=None, eta=None):
-        return cls(MsgType.flightStatus, flight_number=flight_number, status=status, timestamp=timestamp, eta=eta)
+    def flight_status(cls, flight_number, status, timestamp=None, eta=None, destination=None):
+        return cls(MsgType.flightStatus, flight_number=flight_number, status=status, timestamp=timestamp, eta=eta, destination=destination)
 
     @classmethod
     def alert(cls, alert_type, timestamp=None):
         return cls(MsgType.alert, alert_type=alert_type, timestamp=timestamp)
 
 flight_numbers = [f"VY{i:04d}" for i in range(2375, 2389)]
+destinations = ["BCN", "MAD", "LHR", "CDG", "AMS", "FCO", "FRA", "IST", "BRU", "ZRH"]
 
 def generate_random_flight_info():
     status = random.choice(list(FlightStatus))
@@ -52,21 +54,14 @@ def generate_random_flight_info():
         # Random ETA between 1 and 5 hours from now
         future_time = datetime.now() + timedelta(hours=random.randint(1, 5))
         eta = int(future_time.timestamp())
-    elif status == FlightStatus.departed:
-        # For departed flights, use a time that's already passed (departure time)
-        past_time = datetime.now() - timedelta(minutes=random.randint(15, 120))
-        eta = int(past_time.timestamp())
-    elif status == FlightStatus.arrived:
-        # For arrived flights, use a time that's already passed (arrival time)
-        past_time = datetime.now() - timedelta(minutes=random.randint(5, 60))
-        eta = int(past_time.timestamp())
-    # For cancelled flights, eta remains None
+    # For cancelled, departed, and arrived flights, eta remains None
     
     return BleMessage.flight_status(
         flight_number=random.choice(flight_numbers),
         status=status,
         timestamp=current_timestamp,
-        eta=eta
+        eta=eta,
+        destination=random.choice(destinations)
     )
 
 def generate_random_alert():
@@ -91,6 +86,7 @@ async def get_flight_status():
             "status": msg.status.name if msg.status else None,
             "alert_type": msg.alert_type.name if msg.alert_type else None,
             "eta": msg.eta,
+            "destination": msg.destination,
             "timestamp": msg.timestamp
         } for msg in messages
     ]
