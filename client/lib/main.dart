@@ -16,6 +16,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'theme.dart';
 import 'widgets/message_cards.dart';
 import 'utils/date_utils.dart';
+import 'utils/string_utils.dart';
 import 'views/bluetooth_view.dart';
 import 'services/ble_central_service.dart';
 import 'services/ble_peripheral_service.dart';
@@ -744,6 +745,42 @@ class _MyHomePageState extends State<MyHomePage> {
     setState(() {
       _activeAlerts.add(safeAlert);
     });
+
+    // Show a notification for the new alert
+    _showAlertNotification(safeAlert);
+  }
+
+  // Show a notification for an alert
+  Future<void> _showAlertNotification(Map<String, dynamic> alert) async {
+    // Get alert details
+    final alertType = alert['alert_type'];
+    final message = alert['message'] ?? 'Alert received';
+
+    // Configure notification details
+    const AndroidNotificationDetails androidDetails =
+        AndroidNotificationDetails(
+          'alerts_channel',
+          'Alerts Channel',
+          channelDescription: 'Channel for important flight alerts',
+          importance: Importance.max,
+          priority: Priority.high,
+          // Use default sound and vibration
+          playSound: true,
+          enableVibration: true,
+        );
+
+    const NotificationDetails platformDetails = NotificationDetails(
+      android: androidDetails,
+    );
+
+    // Show the notification
+    await flutterLocalNotificationsPlugin.show(
+      // Use timestamp as unique ID to avoid overwriting
+      DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      'ALERT: ${capitalizeFirstLetter(alertType)}',
+      message,
+      platformDetails,
+    );
   }
 
   // Check if two alert objects are identical in their key properties
