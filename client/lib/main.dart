@@ -1077,23 +1077,29 @@ class _MyHomePageState extends State<MyHomePage> {
           children: <Widget>[
             // Alert section if there are active alerts
             if (_activeAlerts.isNotEmpty) ...[
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'Active Alerts',
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                  TextButton(
-                    onPressed: () => _showAlertsDialog(),
-                    child: const Text('View All'),
-                  ),
-                ],
+              GestureDetector(
+                onTap: () => _showAlertsDialog(),
+                child: Row(
+                  children: [
+                    Text(
+                      'Active Alerts (${_activeAlerts.length})',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(width: 4),
+                    const Icon(Icons.arrow_forward_ios, size: 14),
+                  ],
+                ),
               ),
               const SizedBox(height: 8),
               AlertCard(
                 alert: _activeAlerts.last,
-                onTap: () => _showAlertDialog(_activeAlerts.last),
+                onTap:
+                    () =>
+                        _activeAlerts.length > 1
+                            ? _showAlertsDialog()
+                            : _showAlertDialog(_activeAlerts.last),
+                showMoreIndicator: _activeAlerts.length > 1,
+                moreCount: _activeAlerts.length - 1,
               ),
               const SizedBox(height: 16),
             ],
