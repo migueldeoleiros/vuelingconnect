@@ -956,6 +956,7 @@ class _MyHomePageState extends State<MyHomePage> {
     );
   }
 
+  
   void _navigateToBluetoothView() {
     Navigator.push(
       context,
@@ -1034,4 +1035,6 @@ class _FloatingPlusState extends State<_FloatingPlus>
       ),
     );
   }
+  
+
 }
