@@ -167,28 +167,6 @@ class _MyHomePageState extends State<MyHomePage> {
   Timer? _apiPollingTimer;
   final AudioPlayer _audioPlayer = AudioPlayer();
 
-  Future<void> _showNotification() async {
-    const AndroidNotificationDetails androidDetails =
-        AndroidNotificationDetails(
-          'default_channel',
-          'Default Channel',
-          channelDescription: 'Default channel for app notifications',
-          importance: Importance.max,
-          priority: Priority.high,
-        );
-
-    const NotificationDetails platformDetails = NotificationDetails(
-      android: androidDetails,
-    );
-
-    await flutterLocalNotificationsPlugin.show(
-      0,
-      'Test Notification',
-      'This is a test notification from Vueling Connect',
-      platformDetails,
-    );
-  }
-
   // Flight tracking
   final TextEditingController _flightNumberController = TextEditingController();
   Map<String, dynamic>? _flightInfo;
@@ -851,12 +829,6 @@ class _MyHomePageState extends State<MyHomePage> {
         foregroundColor: Colors.black,
         title: Text(widget.title),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.notifications),
-            onPressed: _showNotification,
-            tooltip: 'Test Notification',
-          ),
-
           IconButton(
             icon: const Icon(Icons.bluetooth),
             onPressed: _navigateToBluetoothView,
