@@ -24,6 +24,7 @@ class FlightCard extends StatelessWidget {
     final timestamp = flight['timestamp'] ?? DateTime.now().toIso8601String();
     final source = flight['source'] ?? 'api';
     final isBluetoothSource = source == 'bluetooth';
+    final String? eta = flight['eta']; // ETA may not be available
 
     final cardContent = Card(
       elevation: 4,
@@ -41,13 +42,9 @@ class FlightCard extends StatelessWidget {
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
                 if (isBluetoothSource)
-                  Tooltip(
+                  const Tooltip(
                     message: 'Received via Bluetooth',
-                    child: Icon(
-                      Icons.bluetooth,
-                      color: Colors.blue,
-                      size: 20,
-                    ),
+                    child: Icon(Icons.bluetooth, color: Colors.blue, size: 20),
                   ),
               ],
             ),
@@ -59,6 +56,19 @@ class FlightCard extends StatelessWidget {
                 color: getStatusColor(flightStatus),
               ),
             ),
+            // Show ETA if available and status is not "arrived" or "cancelled"
+            if (eta != null &&
+                flightStatus != 'arrived' &&
+                flightStatus != 'cancelled') ...[
+              const SizedBox(height: 8),
+              Text(
+                'ETA: ${formatDateTime(eta)}',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Theme.of(context).colorScheme.secondary,
+                ),
+              ),
+            ],
             const SizedBox(height: 8),
             Text(flightMessage),
             const SizedBox(height: 8),
@@ -70,7 +80,7 @@ class FlightCard extends StatelessWidget {
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
                 if (isBluetoothSource)
-                  Text(
+                  const Text(
                     'BLE',
                     style: TextStyle(
                       color: Colors.blue,
@@ -125,13 +135,9 @@ class AlertCard extends StatelessWidget {
               style: const TextStyle(fontWeight: FontWeight.bold),
             ),
             if (isBluetoothSource)
-              Padding(
-                padding: const EdgeInsets.only(left: 8.0),
-                child: Icon(
-                  Icons.bluetooth,
-                  color: Colors.blue,
-                  size: 16,
-                ),
+              const Padding(
+                padding: EdgeInsets.only(left: 8.0),
+                child: Icon(Icons.bluetooth, color: Colors.blue, size: 16),
               ),
           ],
         ),
@@ -140,7 +146,7 @@ class AlertCard extends StatelessWidget {
           children: [
             Text(message),
             if (isBluetoothSource)
-              Text(
+              const Text(
                 'Received via Bluetooth',
                 style: TextStyle(
                   color: Colors.blue,
@@ -177,13 +183,9 @@ class AlertCard extends StatelessWidget {
                 const SizedBox(width: 8),
                 const Text('Alert'),
                 if (isBluetoothSource)
-                  Padding(
-                    padding: const EdgeInsets.only(left: 8.0),
-                    child: Icon(
-                      Icons.bluetooth,
-                      color: Colors.blue,
-                      size: 16,
-                    ),
+                  const Padding(
+                    padding: EdgeInsets.only(left: 8.0),
+                    child: Icon(Icons.bluetooth, color: Colors.blue, size: 16),
                   ),
               ],
             ),
@@ -201,8 +203,8 @@ class AlertCard extends StatelessWidget {
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
                 if (isBluetoothSource)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8.0),
+                  const Padding(
+                    padding: EdgeInsets.only(top: 8.0),
                     child: Text(
                       'Received via Bluetooth',
                       style: TextStyle(
