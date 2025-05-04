@@ -20,7 +20,6 @@ class FlightCard extends StatelessWidget {
     // Validate required fields exist with reasonable defaults
     final flightNumber = flight['flight_number'] ?? 'Unknown';
     final flightStatus = flight['flight_status'] ?? 'unknown';
-    final flightMessage = flight['flight_message'] ?? 'No message available';
     final timestamp = flight['timestamp'] ?? DateTime.now().toIso8601String();
     final source = flight['source'] ?? 'api';
     final isBluetoothSource = source == 'bluetooth';
@@ -69,8 +68,6 @@ class FlightCard extends StatelessWidget {
                 ),
               ),
             ],
-            const SizedBox(height: 8),
-            Text(flightMessage),
             const SizedBox(height: 8),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
