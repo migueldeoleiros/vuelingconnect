@@ -456,7 +456,10 @@ class _BluetoothViewState extends State<BluetoothView> {
                       timestamp: DateTime.now().millisecondsSinceEpoch ~/ 1000,
                     );
 
-                    // Just broadcast this single message without changing the overall broadcast state
+                    // Add the message to the MessageStore first
+                    _messageStore.addMessage(msg);
+
+                    // Broadcast the message through the peripheral service
                     await _peripheralService.broadcastMessage(msg.encode());
 
                     // Show a confirmation message

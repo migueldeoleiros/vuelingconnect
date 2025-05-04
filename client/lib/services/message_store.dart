@@ -12,6 +12,8 @@ class MessageStore {
   final Map<String, BleMessage> _messages = {};
   // Track last broadcast time for each message
   final Map<String, int> _lastBroadcastTime = {};
+  // Track when each message was received
+  final Map<String, int> _receivedTime = {};
   // Track recent broadcasts for logging/display
   final List<String> _recentBroadcastLogs = [];
   
@@ -20,9 +22,11 @@ class MessageStore {
   static const int BROADCAST_INTERVAL_MS = 5000; // 5 seconds between broadcasts
   static const int MAX_MESSAGES_TO_RELAY = 10; // Maximum number of messages to consider for relay
   static const int MAX_LOG_ENTRIES = 20; // Maximum number of log entries to keep
+  static const int MESSAGE_EXPIRY_MS = 3600000; // Messages expire after 1 hour
   
   // Broadcast rotation
   Timer? _broadcastTimer;
+  Timer? _cleanupTimer;
   int _currentIndex = 0;
   bool _isAutoRelayEnabled = false;
   
@@ -46,11 +50,20 @@ class MessageStore {
   /// Add a message to the store
   void addMessage(BleMessage message) {
     String messageId = message.messageId;
+    final now = DateTime.now().millisecondsSinceEpoch;
     
-    // Only add if new or has a lower hop count for the same message
-    if (!_messages.containsKey(messageId) || 
-        _messages[messageId]!.hopCount > message.hopCount) {
-      _logger.info('Adding/updating message: $messageId with hop count: ${message.hopCount}');
+    // Check if this is a new message or has a lower hop count
+    bool isNewMessage = !_messages.containsKey(messageId);
+    bool hasLowerHopCount = !isNewMessage && _messages[messageId]!.hopCount > message.hopCount;
+    
+    if (isNewMessage || hasLowerHopCount) {
+      if (isNewMessage) {
+        _logger.info('Adding new message: $messageId with hop count: ${message.hopCount}');
+        _receivedTime[messageId] = now;
+      } else {
+        _logger.info('Updating message: $messageId with lower hop count: ${message.hopCount}');
+      }
+      
       _messages[messageId] = message;
       
       // If auto-relay is enabled, ensure the broadcast timer is running
@@ -58,11 +71,11 @@ class MessageStore {
         _startBroadcastTimer();
       }
     } else {
-      _logger.fine('Ignoring message with higher or equal hop count: $messageId');
+      _logger.fine('Ignoring duplicate message with higher or equal hop count: $messageId');
     }
   }
   
-  /// Get messages to broadcast based on recency and hop count
+  /// Get messages to broadcast based on recency, hop count, and last broadcast time
   List<BleMessage> getMessagesToRelay() {
     if (_messages.isEmpty) return [];
     
@@ -73,13 +86,32 @@ class MessageStore {
     
     if (eligibleMessages.isEmpty) return [];
     
-    // Sort by timestamp (newer first) and hop count (lower first)
+    final now = DateTime.now().millisecondsSinceEpoch;
+    
+    // Sort by a combination of factors:
+    // 1. Time since last broadcast (prioritize messages not broadcast recently)
+    // 2. Recency of message (newer messages get higher priority)
+    // 3. Hop count (lower hop count gets higher priority)
     eligibleMessages.sort((a, b) {
-      // First prioritize by recency (newer messages first)
-      int timeCompare = b.timestamp.compareTo(a.timestamp);
+      // First prioritize by time since last broadcast
+      int lastBroadcastA = _lastBroadcastTime[a.messageId] ?? 0;
+      int lastBroadcastB = _lastBroadcastTime[b.messageId] ?? 0;
+      
+      // If a message has never been broadcast, give it highest priority
+      if (lastBroadcastA == 0 && lastBroadcastB > 0) return -1;
+      if (lastBroadcastB == 0 && lastBroadcastA > 0) return 1;
+      
+      // Otherwise prioritize messages that haven't been broadcast recently
+      int timeSinceLastA = now - lastBroadcastA;
+      int timeSinceLastB = now - lastBroadcastB;
+      int timeCompare = timeSinceLastB.compareTo(timeSinceLastA);
       if (timeCompare != 0) return timeCompare;
       
-      // Then by hop count (lower hop count first)
+      // Then prioritize by recency (newer messages first)
+      int messageTimeCompare = b.timestamp.compareTo(a.timestamp);
+      if (messageTimeCompare != 0) return messageTimeCompare;
+      
+      // Finally by hop count (lower hop count first)
       return a.hopCount.compareTo(b.hopCount);
     });
     
@@ -101,6 +133,9 @@ class MessageStore {
       _logger.info('No messages to relay yet, timer will start when messages are added');
       _addBroadcastLog('No messages to relay yet, waiting for messages');
     }
+    
+    // Start the cleanup timer
+    _startCleanupTimer();
   }
   
   /// Stop automatic broadcasting
@@ -114,6 +149,11 @@ class MessageStore {
     if (_broadcastTimer != null) {
       _broadcastTimer!.cancel();
       _broadcastTimer = null;
+    }
+    
+    if (_cleanupTimer != null) {
+      _cleanupTimer!.cancel();
+      _cleanupTimer = null;
     }
   }
   
@@ -135,11 +175,15 @@ class MessageStore {
       return;
     }
     
-    // Rotate through messages
-    _currentIndex = (_currentIndex + 1) % messages.length;
+    // Reset index if it's out of bounds (can happen if messages were removed)
+    if (_currentIndex >= messages.length) {
+      _currentIndex = 0;
+    }
+    
+    // Get the current message to broadcast
     BleMessage message = messages[_currentIndex];
     
-    // Increment hop count before broadcasting
+    // Create a new message with incremented hop count instead of modifying the original
     BleMessage updatedMessage = message.incrementHopCount();
     
     try {
@@ -152,11 +196,50 @@ class MessageStore {
       // Update last broadcast time
       _lastBroadcastTime[message.messageId] = DateTime.now().millisecondsSinceEpoch;
       
-      // Update the message in the store with the incremented hop count
+      // Store the updated message with incremented hop count
       _messages[message.messageId] = updatedMessage;
+      
+      // Increment index for next broadcast
+      _currentIndex = (_currentIndex + 1) % messages.length;
     } catch (e) {
       _logger.severe('Error broadcasting message: $e');
       _addBroadcastLog('Error broadcasting message: $e');
+    }
+  }
+  
+  /// Start the cleanup timer to remove expired messages
+  void _startCleanupTimer() {
+    _cleanupTimer?.cancel();
+    _cleanupTimer = Timer.periodic(
+      const Duration(minutes: 5), 
+      (_) => _cleanupExpiredMessages()
+    );
+    _logger.info('Started message cleanup timer with interval: 5 minutes');
+  }
+  
+  /// Remove expired messages from the store
+  void _cleanupExpiredMessages() {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final expiredMessageIds = <String>[];
+    
+    // Find expired messages
+    _messages.forEach((id, message) {
+      final messageTimestamp = message.timestamp * 1000; // Convert to milliseconds
+      if (now - messageTimestamp > MESSAGE_EXPIRY_MS) {
+        expiredMessageIds.add(id);
+      }
+    });
+    
+    // Remove expired messages
+    for (final id in expiredMessageIds) {
+      _messages.remove(id);
+      _lastBroadcastTime.remove(id);
+      _receivedTime.remove(id);
+    }
+    
+    if (expiredMessageIds.isNotEmpty) {
+      _logger.info('Removed ${expiredMessageIds.length} expired messages');
+      _addBroadcastLog('Removed ${expiredMessageIds.length} expired messages');
     }
   }
   
@@ -188,6 +271,7 @@ class MessageStore {
   void clearMessages() {
     _messages.clear();
     _lastBroadcastTime.clear();
+    _receivedTime.clear();
     _logger.info('Cleared all messages from store');
     _addBroadcastLog('Cleared all messages from store');
   }

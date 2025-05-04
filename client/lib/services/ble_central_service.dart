@@ -18,6 +18,12 @@ class BleCentralService {
   // Store message IDs of recently processed messages to avoid duplicates
   final Set<String> _recentMessageIds = {};
   static const int _maxRecentMessages = 100; // Increased to handle more messages
+  
+  // Retry mechanism for scan failures
+  Timer? _scanRetryTimer;
+  static const int _scanRetryIntervalMs = 5000; // 5 seconds between retries
+  static const int _maxScanRetries = 3;
+  int _scanRetryCount = 0;
 
   /// Stream of raw manufacturer data bytes (id=0xFFFF)
   Stream<Uint8List> get dataStream => _dataController.stream;
@@ -31,6 +37,9 @@ class BleCentralService {
       _logger.info('Already scanning, ignoring startDiscovery call');
       return;
     }
+    
+    // Reset retry count
+    _scanRetryCount = 0;
     
     // Check permissions on Android
     if (Platform.isAndroid) {
@@ -52,7 +61,7 @@ class BleCentralService {
           if (event.advertisement.manufacturerSpecificData.isNotEmpty) {
             for (final msd in event.advertisement.manufacturerSpecificData) {
               if (msd.id == 0xFFFF) {
-                _logger.info('Discovered VuelingConnect data: ${msd.data.length} bytes');
+                _logger.info('Discovered VuelingConnect data: ${msd.data.length} bytes, RSSI: ${event.rssi}');
                 
                 // Process the message to check if it's a duplicate
                 try {
@@ -61,7 +70,7 @@ class BleCentralService {
                   
                   // Check if we've seen this message ID before
                   if (_recentMessageIds.contains(messageId)) {
-                    _logger.info('Rejected duplicate message with ID: $messageId');
+                    _logger.fine('Rejected duplicate message with ID: $messageId');
                   } else {
                     // Add to recent messages and maintain size limit
                     _recentMessageIds.add(messageId);
@@ -84,16 +93,66 @@ class BleCentralService {
         },
         onError: (error) {
           _logger.severe('Error in BLE discovery: $error');
+          _restartScanningIfNeeded();
         },
       );
       
-      // Start scanning with a more aggressive configuration
+      // Start scanning
       await _manager.startDiscovery();
       _isScanning = true;
       _logger.info('Started BLE discovery');
+      
+      // Set up periodic scan restart to prevent Android from throttling
+      _setupPeriodicScanRestart();
     } catch (e) {
       _logger.severe('Failed to start BLE discovery: $e');
+      _restartScanningIfNeeded();
       rethrow;
+    }
+  }
+  
+  /// Set up periodic scan restart to prevent Android from throttling
+  void _setupPeriodicScanRestart() {
+    // Cancel any existing timer
+    _scanRetryTimer?.cancel();
+    
+    // Restart scanning every 30 seconds to prevent Android from throttling
+    _scanRetryTimer = Timer.periodic(const Duration(seconds: 30), (_) async {
+      if (_isScanning) {
+        _logger.info('Performing periodic scan restart to prevent throttling');
+        try {
+          await stopDiscovery();
+          await Future.delayed(const Duration(milliseconds: 500));
+          await startDiscovery();
+        } catch (e) {
+          _logger.warning('Error during periodic scan restart: $e');
+        }
+      }
+    });
+  }
+  
+  /// Restart scanning if needed after an error
+  void _restartScanningIfNeeded() {
+    if (_scanRetryCount < _maxScanRetries) {
+      _scanRetryCount++;
+      _logger.info('Attempting to restart scanning (retry $_scanRetryCount of $_maxScanRetries)');
+      
+      // Cancel any existing timer
+      _scanRetryTimer?.cancel();
+      
+      // Try to restart after a delay
+      _scanRetryTimer = Timer(Duration(milliseconds: _scanRetryIntervalMs), () async {
+        try {
+          // Make sure we're stopped first
+          await stopDiscovery();
+          await Future.delayed(const Duration(milliseconds: 500));
+          await startDiscovery();
+        } catch (e) {
+          _logger.severe('Error restarting BLE discovery: $e');
+        }
+      });
+    } else {
+      _logger.severe('Maximum scan retry attempts reached');
     }
   }
 
@@ -138,6 +197,10 @@ class BleCentralService {
       _discoverSub = null;
       _isScanning = false;
       _logger.info('Stopped BLE discovery');
+      
+      // Cancel any retry timer
+      _scanRetryTimer?.cancel();
+      _scanRetryTimer = null;
     } catch (e) {
       _logger.warning('Error stopping BLE discovery: $e');
     }
@@ -148,6 +211,7 @@ class BleCentralService {
     stopDiscovery();
     _dataController.close();
     _recentMessageIds.clear();
+    _scanRetryTimer?.cancel();
     _logger.info('Disposed BleCentralService');
   }
 }
