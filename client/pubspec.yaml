@@ -1,5 +1,5 @@
 name: prueba_app
-description: "A new Flutter project."
+description: "Red P2P de alertas en aeropuertos"
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 
 version: 1.0.0+1
@@ -21,6 +21,7 @@ dependencies:
   permission_handler: ^11.3.0
   license_checker: ^1.6.0
   flutter_local_notifications: ^19.1.0
+  rename_app: ^1.6.3
 
 dev_dependencies:
   flutter_test:

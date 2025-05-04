@@ -27,6 +27,8 @@ import 'utils/string_utils.dart';
 import 'views/bluetooth_view.dart';
 import 'widgets/message_cards.dart';
 
+import 'package:rename_app/rename_app.dart';
+
 final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
     FlutterLocalNotificationsPlugin();
 final StreamController<NotificationResponse> selectNotificationStream =
