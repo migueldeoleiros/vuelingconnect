@@ -24,13 +24,14 @@ import 'providers/bluetooth_state_provider.dart';
 
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
-final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
+final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
+    FlutterLocalNotificationsPlugin();
 final StreamController<NotificationResponse> selectNotificationStream =
     StreamController<NotificationResponse>.broadcast();
-  
 
-const MethodChannel platform =
-    MethodChannel('dexterx.dev/flutter_local_notifications_example');
+const MethodChannel platform = MethodChannel(
+  'dexterx.dev/flutter_local_notifications_example',
+);
 
 const String portName = 'notification_send_port';
 
@@ -56,18 +57,17 @@ void main() async {
   }
 
   const AndroidInitializationSettings initializationSettingsAndroid =
-          AndroidInitializationSettings('@mipmap/ic_launcher');
+      AndroidInitializationSettings('@mipmap/ic_launcher');
 
+  const InitializationSettings initializationSettings = InitializationSettings(
+    android: initializationSettingsAndroid,
+  );
 
-    final InitializationSettings initializationSettings = InitializationSettings(
-      android: initializationSettingsAndroid,
-    );
-
-    await flutterLocalNotificationsPlugin.initialize(
-      initializationSettings,
-      onDidReceiveNotificationResponse: selectNotificationStream.add,
-      onDidReceiveBackgroundNotificationResponse: null,
-    );
+  await flutterLocalNotificationsPlugin.initialize(
+    initializationSettings,
+    onDidReceiveNotificationResponse: selectNotificationStream.add,
+    onDidReceiveBackgroundNotificationResponse: null,
+  );
 
   runApp(const MyApp());
 }
@@ -99,22 +99,19 @@ Future<void> _requestBluetoothPermissions() async {
   }
 }
 
-
-
-
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
-
 
   Future<void> showNotification() async {
     const AndroidNotificationDetails androidPlatformChannelSpecifics =
         AndroidNotificationDetails(
-      'your_channel_id', // Change this to a unique ID
-      'Local Notifications',
+          'your_channel_id', // Change this to a unique ID
+          'Local Notifications',
+        );
+    const NotificationDetails platformChannelSpecifics = NotificationDetails(
+      android: androidPlatformChannelSpecifics,
     );
-    const NotificationDetails platformChannelSpecifics =
-        NotificationDetails(android: androidPlatformChannelSpecifics);
-    
+
     await flutterLocalNotificationsPlugin.show(
       0,
       'Hello, Flutter!',
@@ -122,7 +119,6 @@ class MyApp extends StatelessWidget {
       platformChannelSpecifics,
     );
   }
-
 
   @override
   Widget build(BuildContext context) {
@@ -135,11 +131,13 @@ class MyApp extends StatelessWidget {
         Provider<BlePeripheralService>(create: (_) => BlePeripheralService()),
         ChangeNotifierProvider(create: (_) => BluetoothStateProvider()),
         ProxyProvider<BlePeripheralService, MessageStore>(
-          create: (context) => MessageStore(
-            Provider.of<BlePeripheralService>(context, listen: false),
-          ),
-          update: (_, peripheralService, previous) => 
-            previous ?? MessageStore(peripheralService),
+          create:
+              (context) => MessageStore(
+                Provider.of<BlePeripheralService>(context, listen: false),
+              ),
+          update:
+              (_, peripheralService, previous) =>
+                  previous ?? MessageStore(peripheralService),
           dispose: (_, store) => store.dispose(),
         ),
       ],
@@ -158,9 +156,6 @@ class MyHomePage extends StatefulWidget {
   const MyHomePage({super.key, required this.title});
   final String title;
 
-
-
-
   @override
   State<MyHomePage> createState() => _MyHomePageState();
 }
@@ -171,31 +166,27 @@ class _MyHomePageState extends State<MyHomePage> {
   Timer? _apiPollingTimer;
   final AudioPlayer _audioPlayer = AudioPlayer();
 
-    Future<void> _showNotification() async {
-    const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-      'default_channel',
-      'Default Channel',
-      channelDescription: 'Default channel for app notifications',
-      importance: Importance.max,
-      priority: Priority.high,
-    );
+  Future<void> _showNotification() async {
+    const AndroidNotificationDetails androidDetails =
+        AndroidNotificationDetails(
+          'default_channel',
+          'Default Channel',
+          channelDescription: 'Default channel for app notifications',
+          importance: Importance.max,
+          priority: Priority.high,
+        );
 
     const NotificationDetails platformDetails = NotificationDetails(
       android: androidDetails,
     );
 
-    
-    
-
-      await flutterLocalNotificationsPlugin.show(
-            0,
-            'Test Notification',
-            'This is a test notification from Vueling Connect',
-            platformDetails,
-          );
-    
+    await flutterLocalNotificationsPlugin.show(
+      0,
+      'Test Notification',
+      'This is a test notification from Vueling Connect',
+      platformDetails,
+    );
   }
-
 
   // Flight tracking
   final TextEditingController _flightNumberController = TextEditingController();
@@ -262,19 +253,16 @@ class _MyHomePageState extends State<MyHomePage> {
       context,
       listen: false,
     );
-    
+
     // Get the message store for automatic relaying
-    final messageStore = Provider.of<MessageStore>(
-      context,
-      listen: false,
-    );
+    final messageStore = Provider.of<MessageStore>(context, listen: false);
 
     // Subscribe to the BLE central data stream
     _bleCentralSubscription = centralService.dataStream.listen((data) {
       try {
         // Decode the BLE message
         final bleMessage = BleMessage.decode(Uint8List.fromList(data));
-        
+
         // Add the message to the store for potential relaying
         messageStore.addMessage(bleMessage);
 
@@ -402,13 +390,10 @@ class _MyHomePageState extends State<MyHomePage> {
 
     final apiUrl = 'http://$host:$_serverPort/flight-status';
     print('Connecting to API: $apiUrl');
-    
+
     // Get the message store for automatic relaying
-    final messageStore = Provider.of<MessageStore>(
-      context,
-      listen: false,
-    );
-    
+    final messageStore = Provider.of<MessageStore>(context, listen: false);
+
     // Get reference to the Bluetooth view to send API messages
     final bluetoothViewState = _bluetoothViewKey.currentState;
 
@@ -426,20 +411,21 @@ class _MyHomePageState extends State<MyHomePage> {
             // Only process if we have the minimum required fields
             if (msg['flight_number'] != null) {
               // Extract timestamp
-              int timestamp = (msg['timestamp'] is int)
-                  ? msg['timestamp']
-                  : int.parse(msg['timestamp'].toString());
-              
+              int timestamp =
+                  (msg['timestamp'] is int)
+                      ? msg['timestamp']
+                      : int.parse(msg['timestamp'].toString());
+
               // Create BLE message for relay
               final bleMessage = BleMessage.flightStatus(
                 flightNumber: msg['flight_number'],
                 status: _getFlightStatusEnum(msg['status']),
                 timestamp: timestamp,
               );
-              
+
               // Add to message store for relaying
               messageStore.addMessage(bleMessage);
-              
+
               // Convert to our format
               final flight = {
                 'flight_number': msg['flight_number'],
@@ -453,7 +439,7 @@ class _MyHomePageState extends State<MyHomePage> {
                 'msg_type': 'flight',
               };
               _updateFlightInfo(flight);
-              
+
               // Send to Bluetooth view if available
               if (bluetoothViewState != null) {
                 bluetoothViewState.addApiMessage(flight);
@@ -463,19 +449,20 @@ class _MyHomePageState extends State<MyHomePage> {
             // Only process if we have the minimum required fields
             if (msg['alert_type'] != null && msg['timestamp'] != null) {
               // Extract timestamp
-              int timestamp = (msg['timestamp'] is int)
-                  ? msg['timestamp']
-                  : int.parse(msg['timestamp'].toString());
-              
+              int timestamp =
+                  (msg['timestamp'] is int)
+                      ? msg['timestamp']
+                      : int.parse(msg['timestamp'].toString());
+
               // Create BLE message for relay
               final bleMessage = BleMessage.alert(
                 alertMessage: _getAlertMessageEnum(msg['alert_type']),
                 timestamp: timestamp,
               );
-              
+
               // Add to message store for relaying
               messageStore.addMessage(bleMessage);
-              
+
               // Process alert
               final alert = {
                 'alert_type': msg['alert_type'],
@@ -488,7 +475,7 @@ class _MyHomePageState extends State<MyHomePage> {
                 'msg_type': 'alert',
               };
               _addAlert(alert);
-              
+
               // Send to Bluetooth view if available
               if (bluetoothViewState != null) {
                 bluetoothViewState.addApiMessage(alert);
@@ -507,7 +494,7 @@ class _MyHomePageState extends State<MyHomePage> {
       print('Error fetching from API: $e');
     }
   }
-  
+
   // Helper to convert string to FlightStatus enum
   FlightStatus _getFlightStatusEnum(String? status) {
     if (status == null) return FlightStatus.scheduled;
@@ -526,7 +513,7 @@ class _MyHomePageState extends State<MyHomePage> {
         return FlightStatus.scheduled;
     }
   }
-  
+
   // Helper to convert string to AlertMessage enum
   AlertMessage _getAlertMessageEnum(String? alertType) {
     if (alertType == null) return AlertMessage.evacuation;
@@ -659,9 +646,10 @@ class _MyHomePageState extends State<MyHomePage> {
         if (newTimestamp.isAfter(existingTimestamp)) {
           setState(() {
             _savedFlights[index] = updatedFlight;
-            
+
             // Only update _flightInfo if we're currently viewing this specific flight
-            if (_flightInfo != null && _flightInfo!['flight_number'] == flightNumber) {
+            if (_flightInfo != null &&
+                _flightInfo!['flight_number'] == flightNumber) {
               _flightInfo = updatedFlight;
             }
           });
@@ -669,7 +657,8 @@ class _MyHomePageState extends State<MyHomePage> {
           // Use existing flight info if it's newer
           setState(() {
             // Only update _flightInfo if we're currently viewing this specific flight
-            if (_flightInfo != null && _flightInfo!['flight_number'] == flightNumber) {
+            if (_flightInfo != null &&
+                _flightInfo!['flight_number'] == flightNumber) {
               _flightInfo = _savedFlights[index];
             }
           });
@@ -678,9 +667,10 @@ class _MyHomePageState extends State<MyHomePage> {
         // If there's an issue with timestamp parsing, just update with new info
         setState(() {
           _savedFlights[index] = updatedFlight;
-          
+
           // Only update _flightInfo if we're currently viewing this specific flight
-          if (_flightInfo != null && _flightInfo!['flight_number'] == flightNumber) {
+          if (_flightInfo != null &&
+              _flightInfo!['flight_number'] == flightNumber) {
             _flightInfo = updatedFlight;
           }
         });
@@ -690,7 +680,7 @@ class _MyHomePageState extends State<MyHomePage> {
       // New flight, add it
       setState(() {
         _savedFlights.add(updatedFlight);
-        
+
         // Don't automatically set _flightInfo to the new flight
         // This allows the "All Flights" view to remain visible
       });
@@ -755,8 +745,6 @@ class _MyHomePageState extends State<MyHomePage> {
       _activeAlerts.add(safeAlert);
     });
   }
-
-  
 
   // Check if two alert objects are identical in their key properties
   bool _isIdenticalAlert(
@@ -826,14 +814,11 @@ class _MyHomePageState extends State<MyHomePage> {
         foregroundColor: Colors.black,
         title: Text(widget.title),
         actions: [
-
-
           IconButton(
             icon: const Icon(Icons.notifications),
             onPressed: _showNotification,
             tooltip: 'Test Notification',
           ),
-
 
           IconButton(
             icon: const Icon(Icons.bluetooth),
@@ -845,8 +830,6 @@ class _MyHomePageState extends State<MyHomePage> {
             onPressed: _showServerSettings,
             tooltip: 'Server Settings',
           ),
-
-
         ],
       ),
       body: Padding(
@@ -911,7 +894,7 @@ class _MyHomePageState extends State<MyHomePage> {
                     _flightNumberController.clear();
                     _fetchFlightInfo();
                   },
-                  icon: const Icon(Icons.list),         
+                  icon: const Icon(Icons.list),
                   label: const Text('View All Flights'),
                 ),
               ),
@@ -921,7 +904,10 @@ class _MyHomePageState extends State<MyHomePage> {
             if (_isLoading)
               const Center(child: CircularProgressIndicator())
             else if (_errorMessage.isNotEmpty)
-              SelectableText(_errorMessage, style: TextStyle(color: Colors.red))
+              SelectableText(
+                _errorMessage,
+                style: const TextStyle(color: Colors.red),
+              )
             else if (_flightInfo != null)
               FlightCard(flight: _flightInfo!, isExpanded: true)
             else if (_savedFlights.isNotEmpty)
