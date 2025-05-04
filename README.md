@@ -154,6 +154,45 @@ If msgType == Alert:
 - **Hop Count (Lowest First)**: Prioritizes messages that haven't traveled as far
 - **Rotation**: Round-robin scheduling for all eligible messages
 
+
+## Photos
+
+<table>
+  <tr align="center">
+    <td width="33%">
+      <img src="resources/alertas.png" alt="Alertas" width="250"/>
+    </td>
+    <td width="33%">
+      <img src="resources/asks.png" alt="Asks" width="250"/>
+    </td>
+    <td width="33%">
+      <img src="resources/bte_off.png" alt="BTE Apagado" width="250"/>
+    </td>
+  </tr>
+  <tr align="center">
+    <td width="33%">
+      <img src="resources/bte.png" alt="Menu BTE" width="250"/>
+    </td>
+    <td width="33%">
+      <img src="resources/canceled.png" alt="Canceled" width="250"/>
+    </td>
+    <td width="33%">
+      <img src="resources/flights.png" alt="Vuelos" width="250"/>
+    </td>
+  </tr>
+  <tr align="center">
+    <td width="33%">
+      <img src="resources/logros_se.png" alt="Logros" width="250"/>
+    </td>
+    <td width="33%">
+      <img src="resources/logros.png" alt="Logros" width="250"/>
+    </td>
+    <td width="33%">
+            <img src="resources/plane1.png" alt="Aviones" width="250"/>
+    </td>
+  </tr>
+</table>
+
 ## 🔮 Future Plans
 
 - Real-time translation for international travelers
