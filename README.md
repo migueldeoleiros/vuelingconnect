@@ -168,6 +168,44 @@ If msgType == Alert:
 - [Martín García](https://github.com/martinge17)
 - [Juan Villaverde](https://github.com/JuanVillaverdeRodriguez)
 
+## Photos
+
+<table>
+  <tr align="center">
+    <td width="33%">
+      <img src="resources/alertas.png" alt="Alertas" width="250"/>
+    </td>
+    <td width="33%">
+      <img src="resources/asks.png" alt="Asks" width="250"/>
+    </td>
+    <td width="33%">
+      <img src="resources/bte_off.jpg" alt="BTE Apagado" width="250"/>
+    </td>
+  </tr>
+  <tr align="center">
+    <td width="33%">
+      <img src="resources/bte.jpg" alt="Menu BTE" width="250"/>
+    </td>
+    <td width="33%">
+      <img src="resources/canceled.png" alt="Canceled" width="250"/>
+    </td>
+    <td width="33%">
+      <img src="resources/flights.jpg" alt="Vuelos" width="250"/>
+    </td>
+  </tr>
+  <tr align="center">
+    <td width="33%">
+      <img src="resources/logros_se.jpg" alt="Logros" width="250"/>
+    </td>
+    <td width="33%">
+      <img src="resources/logros.jpg" alt="Logros" width="250"/>
+    </td>
+    <td width="33%">
+            <img src="resources/plane1.jpg" alt="Aviones" width="250"/>
+    </td>
+  </tr>
+</table>
+
 ## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
