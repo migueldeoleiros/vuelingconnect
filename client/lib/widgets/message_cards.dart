@@ -192,7 +192,7 @@ class FlightCard extends StatelessWidget {
                           // Show confirmation
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
-                              content: Text('Subscribed to Flight $flightNumber updates'),
+                              content: Text('Subscribed to Flight $flightNumber updates', style: const TextStyle(color: Colors.white)),
                               duration: const Duration(seconds: 2),
                             ),
                           );
