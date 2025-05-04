@@ -1,6 +1,6 @@
 # VuelingConnect
 
-![VuelingConnect Logo](client\android\app\src\main\res\mipmap-xxxhdpi\ic_launcher.png)
+![VuelingConnect Logo](client/android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png)
 
 > A decentralized communication network for travelers during connectivity outages
 
@@ -135,6 +135,8 @@ If msgType == FlightStatus:
             - Arrived (2)
             - Delayed (3)
             - Cancelled (4)
+  [4 bytes] eta: Estimated Time of Arrival in epoch seconds, big-endian (0 if not available)
+  [3 bytes] destination: IATA airport code, ASCII encoded, padded with zeros
   [4 bytes] timestamp: Epoch seconds, big-endian
 
 If msgType == Alert:
