@@ -14,9 +14,9 @@ class BleMessage {
   final AlertMessage? alertMessage; // Only for AlertMessage
   final int timestamp; // Epoch seconds
   final int hopCount; // Number of times this message has been relayed
-  final int?
-  eta; // Estimated Time of Arrival (epoch seconds), only for FlightStatus
+  final int? eta; // Estimated Time of Arrival (epoch seconds), only for FlightStatus
   final String? destination; // Destination IATA code, only for FlightStatus
+  final String? deviceId; // Optional device identifier for uniqueness
 
   BleMessage.flightStatus({
     required this.flightNumber,
@@ -25,6 +25,7 @@ class BleMessage {
     this.hopCount = 0,
     this.eta,
     this.destination,
+    this.deviceId,
   }) : msgType = MsgType.flightStatus,
        alertMessage = null;
 
@@ -32,6 +33,7 @@ class BleMessage {
     required this.alertMessage,
     required this.timestamp,
     this.hopCount = 0,
+    this.deviceId,
   }) : msgType = MsgType.alert,
        flightNumber = null,
        status = null,
@@ -48,18 +50,21 @@ class BleMessage {
         hopCount: hopCount + 1,
         eta: eta,
         destination: destination,
+        deviceId: deviceId,
       );
     } else {
       return BleMessage.alert(
         alertMessage: alertMessage,
         timestamp: timestamp,
         hopCount: hopCount + 1,
+        deviceId: deviceId,
       );
     }
   }
 
   /// Generates a message ID based on content (excluding hop count)
   String get messageId {
+    // Create a unique identifier by combining content and timestamp
     if (msgType == MsgType.flightStatus) {
       return 'flight_${flightNumber}_${status!.index}_$timestamp';
     } else {

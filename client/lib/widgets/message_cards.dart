@@ -91,15 +91,15 @@ class FlightCard extends StatelessWidget {
                           const SizedBox(width: 8),
                         ],
                       ),
-                    if (isBluetoothSource)
-                      const Tooltip(
-                        message: 'Received via Bluetooth',
-                        child: Icon(
-                          Icons.bluetooth,
-                          color: Colors.blue,
-                          size: 20,
-                        ),
-                      ),
+                    // if (isBluetoothSource)
+                    //   const Tooltip(
+                    //     message: 'Received via Bluetooth',
+                    //     child: Icon(
+                    //       Icons.bluetooth,
+                    //       color: Colors.blue,
+                    //       size: 20,
+                    //     ),
+                    //   ),
                   ],
                 ),
               ],
@@ -165,15 +165,15 @@ class FlightCard extends StatelessWidget {
                     ),
                   ],
                 ),
-                if (isBluetoothSource && !isExpanded)
-                  const Text(
-                    'BLE',
-                    style: TextStyle(
-                      color: Colors.blue,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 12,
-                    ),
-                  ),
+                // if (isBluetoothSource && !isExpanded)
+                //   const Text(
+                //     'BLE',
+                //     style: TextStyle(
+                //       color: Colors.blue,
+                //       fontWeight: FontWeight.bold,
+                //       fontSize: 12,
+                //     ),
+                //   ),
               ],
             ),
           ],

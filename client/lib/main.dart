@@ -459,6 +459,7 @@ class _MyHomePageState extends State<MyHomePage> {
                 status: _getFlightStatusEnum(msg['status']),
                 timestamp: timestamp,
                 eta: eta,
+                destination: msg['destination'],
               );
 
               // Add to message store for relaying
@@ -948,7 +949,7 @@ class _MyHomePageState extends State<MyHomePage> {
   bool _isScaled = false;
   bool _showFloatingPlus = false;
   late Timer _pointTimer;
-  
+
   @override
   Widget build(BuildContext context) {
 

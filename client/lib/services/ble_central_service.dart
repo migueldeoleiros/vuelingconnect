@@ -16,8 +16,9 @@ class BleCentralService {
   bool _isScanning = false;
   
   // Store message IDs of recently processed messages to avoid duplicates
-  final Set<String> _recentMessageIds = {};
-  static const int _maxRecentMessages = 100; // Increased to handle more messages
+  final Map<String, int> _recentMessageIds = {}; // Map messageId to timestamp
+  static const int _maxRecentMessages = 100; // Number of messages to track
+  static const int _messageExpiryMs = 60000; // 1 minute expiry for duplicate detection
   
   // Retry mechanism for scan failures
   Timer? _scanRetryTimer;
@@ -67,21 +68,34 @@ class BleCentralService {
                 try {
                   final message = BleMessage.decode(msd.data);
                   final messageId = message.messageId;
+                  final now = DateTime.now().millisecondsSinceEpoch;
                   
-                  // Check if we've seen this message ID before
-                  if (_recentMessageIds.contains(messageId)) {
-                    _logger.fine('Rejected duplicate message with ID: $messageId');
-                  } else {
-                    // Add to recent messages and maintain size limit
-                    _recentMessageIds.add(messageId);
-                    if (_recentMessageIds.length > _maxRecentMessages) {
-                      _recentMessageIds.remove(_recentMessageIds.first);
+                  // Check if we've seen this message ID recently
+                  if (_recentMessageIds.containsKey(messageId)) {
+                    final lastSeen = _recentMessageIds[messageId]!;
+                    final timeSince = now - lastSeen;
+                    
+                    // If we've seen this message recently, ignore it
+                    if (timeSince < _messageExpiryMs) {
+                      _logger.fine('Rejected duplicate message with ID: $messageId (seen ${timeSince}ms ago)');
+                      continue;
                     }
                     
-                    // Pass the data to subscribers
-                    _dataController.add(msd.data);
-                    _logger.info('Processed new message with ID: $messageId, hop count: ${message.hopCount}');
+                    // If it's been a while, update the timestamp and process it again
+                    _recentMessageIds[messageId] = now;
+                  } else {
+                    // Add to recent messages
+                    _recentMessageIds[messageId] = now;
+                    
+                    // Clean up old entries if we have too many
+                    if (_recentMessageIds.length > _maxRecentMessages) {
+                      _cleanupOldMessages();
+                    }
                   }
+                  
+                  // Pass the data to subscribers
+                  _dataController.add(msd.data);
+                  _logger.info('Processed message with ID: $messageId, hop count: ${message.hopCount}');
                 } catch (e) {
                   _logger.warning('Error decoding BLE message: $e');
                   // If we can't decode it, just pass it through
@@ -108,6 +122,35 @@ class BleCentralService {
       _logger.severe('Failed to start BLE discovery: $e');
       _restartScanningIfNeeded();
       rethrow;
+    }
+  }
+  
+  /// Clean up old message entries
+  void _cleanupOldMessages() {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final expiredIds = <String>[];
+    
+    // Find expired messages
+    _recentMessageIds.forEach((id, timestamp) {
+      if (now - timestamp > _messageExpiryMs) {
+        expiredIds.add(id);
+      }
+    });
+    
+    // Remove expired messages
+    for (final id in expiredIds) {
+      _recentMessageIds.remove(id);
+    }
+    
+    // If we still have too many, remove the oldest ones
+    if (_recentMessageIds.length > _maxRecentMessages) {
+      final sortedEntries = _recentMessageIds.entries.toList()
+        ..sort((a, b) => a.value.compareTo(b.value));
+      
+      final toRemove = sortedEntries.length - _maxRecentMessages;
+      for (int i = 0; i < toRemove; i++) {
+        _recentMessageIds.remove(sortedEntries[i].key);
+      }
     }
   }
   
