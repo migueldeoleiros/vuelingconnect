@@ -24,6 +24,8 @@ class FlightCard extends StatelessWidget {
     final source = flight['source'] ?? 'api';
     final isBluetoothSource = source == 'bluetooth';
     final String? eta = flight['eta']; // ETA may not be available
+    final String? destination =
+        flight['destination']; // Destination may not be available
 
     final cardContent = Card(
       elevation: 4,
@@ -55,6 +57,14 @@ class FlightCard extends StatelessWidget {
                 color: getStatusColor(flightStatus),
               ),
             ),
+            // Show destination if available
+            if (destination != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Destination: $destination',
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ],
             // Show ETA if available and status is not "arrived" or "cancelled"
             if (eta != null &&
                 flightStatus != 'arrived' &&

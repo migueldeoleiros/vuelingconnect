@@ -298,6 +298,11 @@ class _MyHomePageState extends State<MyHomePage> {
             'hop_count': bleMessage.hopCount, // Include hop count
           };
 
+          // Add destination if available
+          if (bleMessage.destination != null) {
+            flight['destination'] = bleMessage.destination;
+          }
+
           // Add ETA if available
           if (bleMessage.eta != null) {
             flight['eta'] =
@@ -471,6 +476,11 @@ class _MyHomePageState extends State<MyHomePage> {
                 'source': 'api', // Mark the source as API
                 'msg_type': 'flight',
               };
+
+              // Add destination information if available
+              if (msg['destination'] != null) {
+                flight['destination'] = msg['destination'];
+              }
 
               // Add ETA information if available
               if (eta != null) {
@@ -666,6 +676,11 @@ class _MyHomePageState extends State<MyHomePage> {
           newFlight['source'] ?? 'api', // Default to 'api' if not specified
     };
 
+    // Include destination if available
+    if (newFlight['destination'] != null) {
+      updatedFlight['destination'] = newFlight['destination'];
+    }
+
     // Include ETA if available
     if (newFlight['eta'] != null) {
       updatedFlight['eta'] = newFlight['eta'];
@@ -678,6 +693,12 @@ class _MyHomePageState extends State<MyHomePage> {
       // If existing flight has an ETA and new one doesn't, preserve the existing ETA
       if (existingFlight['eta'] != null && updatedFlight['eta'] == null) {
         updatedFlight['eta'] = existingFlight['eta'];
+      }
+
+      // If existing flight has a destination and new one doesn't, preserve the existing destination
+      if (existingFlight['destination'] != null &&
+          updatedFlight['destination'] == null) {
+        updatedFlight['destination'] = existingFlight['destination'];
       }
 
       if (_isIdenticalFlight(existingFlight, updatedFlight)) {
@@ -766,7 +787,8 @@ class _MyHomePageState extends State<MyHomePage> {
     return flight1['flight_number'] == flight2['flight_number'] &&
         flight1['flight_status'] == flight2['flight_status'] &&
         flight1['timestamp'] == flight2['timestamp'] &&
-        flight1['eta'] == flight2['eta'];
+        flight1['eta'] == flight2['eta'] &&
+        flight1['destination'] == flight2['destination'];
   }
 
   // Save an alert

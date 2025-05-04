@@ -16,6 +16,7 @@ class BleMessage {
   final int hopCount; // Number of times this message has been relayed
   final int?
   eta; // Estimated Time of Arrival (epoch seconds), only for FlightStatus
+  final String? destination; // Destination IATA code, only for FlightStatus
 
   BleMessage.flightStatus({
     required this.flightNumber,
@@ -23,6 +24,7 @@ class BleMessage {
     required this.timestamp,
     this.hopCount = 0,
     this.eta,
+    this.destination,
   }) : msgType = MsgType.flightStatus,
        alertMessage = null;
 
@@ -33,7 +35,8 @@ class BleMessage {
   }) : msgType = MsgType.alert,
        flightNumber = null,
        status = null,
-       eta = null;
+       eta = null,
+       destination = null;
 
   /// Creates a new message with incremented hop count
   BleMessage incrementHopCount() {
@@ -44,6 +47,7 @@ class BleMessage {
         timestamp: timestamp,
         hopCount: hopCount + 1,
         eta: eta,
+        destination: destination,
       );
     } else {
       return BleMessage.alert(
@@ -87,6 +91,20 @@ class BleMessage {
       } else {
         bytes.addAll(_intToBytes(0, 4)); // 4 zeros if no ETA
       }
+
+      // Destination: 3 bytes (IATA code, max 3 characters)
+      if (destination != null) {
+        List<int> destinationBytes = ascii.encode(destination!).toList();
+        if (destinationBytes.length > 3) {
+          destinationBytes = destinationBytes.sublist(0, 3);
+        }
+        while (destinationBytes.length < 3) {
+          destinationBytes.add(0);
+        }
+        bytes.addAll(destinationBytes); // 3 bytes
+      } else {
+        bytes.addAll(_intToBytes(0, 3)); // 3 zeros if no destination
+      }
     } else {
       // For alert messages, just store the enum index
       bytes.add(alertMessage!.index); // 1 byte
@@ -124,6 +142,16 @@ class BleMessage {
       idx += 4;
       int? eta = (etaValue == 0) ? null : etaValue; // 0 means no ETA
 
+      // Read destination if it exists
+      String? destination;
+      if (data.length > idx + 2) {
+        List<int> destinationBytes = data.sublist(idx, idx + 3);
+        destination = ascii.decode(
+          destinationBytes.where((b) => b != 0).toList(),
+        );
+        idx += 3;
+      }
+
       int timestamp = _bytesToInt(data.sublist(idx, idx + 4));
       return BleMessage.flightStatus(
         flightNumber: flightNumber,
@@ -131,6 +159,7 @@ class BleMessage {
         timestamp: timestamp,
         hopCount: hopCount,
         eta: eta,
+        destination: destination,
       );
     } else {
       // Alert message: read enum index
@@ -163,14 +192,15 @@ void testBleMessage() {
     status: FlightStatus.delayed,
     timestamp: now,
     eta: now + 3600, // ETA in 1 hour
+    destination: "LAX",
   );
   var encoded1 = msg1.encode();
   var decoded1 = BleMessage.decode(encoded1);
   print(
-    'Original1: msgType=${msg1.msgType}, flightNumber=${msg1.flightNumber}, status=${msg1.status}, timestamp=${msg1.timestamp}, eta=${msg1.eta}, hopCount=${msg1.hopCount}',
+    'Original1: msgType=${msg1.msgType}, flightNumber=${msg1.flightNumber}, status=${msg1.status}, timestamp=${msg1.timestamp}, eta=${msg1.eta}, hopCount=${msg1.hopCount}, destination=${msg1.destination}',
   );
   print(
-    'Decoded1:  msgType=${decoded1.msgType}, flightNumber=${decoded1.flightNumber}, status=${decoded1.status}, timestamp=${decoded1.timestamp}, eta=${decoded1.eta}, hopCount=${decoded1.hopCount}',
+    'Decoded1:  msgType=${decoded1.msgType}, flightNumber=${decoded1.flightNumber}, status=${decoded1.status}, timestamp=${decoded1.timestamp}, eta=${decoded1.eta}, hopCount=${decoded1.hopCount}, destination=${decoded1.destination}',
   );
 
   // Test hop count increment
