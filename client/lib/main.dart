@@ -1223,7 +1223,10 @@ class _MyHomePageState extends State<MyHomePage> {
       // Show toast
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Bluetooth functionality disabled'),
+          content: Text(
+            'Bluetooth functionality disabled',
+            style: TextStyle(color: Colors.white),
+          ),
           duration: Duration(seconds: 2),
         ),
       );
@@ -1242,7 +1245,10 @@ class _MyHomePageState extends State<MyHomePage> {
       // Show toast
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Bluetooth mesh network active'),
+          content: Text(
+            'Bluetooth mesh network active',
+            style: TextStyle(color: Colors.white),
+          ),
           duration: Duration(seconds: 2),
         ),
       );
@@ -1342,6 +1348,7 @@ class _MyHomePageState extends State<MyHomePage> {
                     SnackBar(
                       content: Text(
                         'Server set to: $_serverAddress:$_serverPort',
+                        style: const TextStyle(color: Colors.white),
                       ),
                     ),
                   );

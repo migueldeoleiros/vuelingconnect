@@ -467,6 +467,7 @@ class _BluetoothViewState extends State<BluetoothView> {
                       SnackBar(
                         content: Text(
                           'Alert sent: ${alertType.toString().split('.').last}',
+                          style: const TextStyle(color: Colors.white),
                         ),
                         duration: const Duration(seconds: 2),
                       ),
