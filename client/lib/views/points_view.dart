@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class PointsView extends StatefulWidget {
-  const PointsView({Key? key}) : super(key: key);
+  const PointsView({super.key});
 
   @override
   State<PointsView> createState() => _PointsViewState();
@@ -83,48 +83,66 @@ class _PointsViewState extends State<PointsView> {
                     ),
                   ),
                   const Spacer(),
-                  Text(
-                    '${clampedPoints - min}/${max - min} pts',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 14,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
                   Icon(
                     isExpanded ? Icons.expand_less : Icons.expand_more,
                     color: color,
                   ),
                 ],
               ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '${clampedPoints - min}/${max - min} pts',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
               const SizedBox(height: 12),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: LinearProgressIndicator(
-                  value: progress.clamp(0.0, 1.0),
-                  minHeight: 12,
-                  color: color,
-                  backgroundColor: color.withOpacity(0.2),
-                ),
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  return SizedBox(
+                    width: constraints.maxWidth,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: LinearProgressIndicator(
+                        value: progress.clamp(0.0, 1.0),
+                        minHeight: 12,
+                        color: color,
+                        backgroundColor: color.withOpacity(0.2),
+                      ),
+                    ),
+                  );
+                },
               ),
               if (isExpanded) ...[
                 const SizedBox(height: 16),
-                ...achievements.map((achievement) => Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.check_circle_outline, size: 18),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              achievement,
-                              style: const TextStyle(fontSize: 14),
-                            ),
+                ...achievements.map(
+                  (achievement) => Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(Icons.check_circle_outline, size: 18),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            achievement,
+                            style: const TextStyle(fontSize: 14),
+                            overflow: TextOverflow.ellipsis,
+                            maxLines: 2,
                           ),
-                        ],
-                      ),
-                    )),
-              ]
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
             ],
           ),
         ),
@@ -136,88 +154,72 @@ class _PointsViewState extends State<PointsView> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Progreso de Nivel')),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Puntos actuales: $_points',
-              style: Theme.of(context).textTheme.headlineSmall,
-            ),
-            const SizedBox(height: 20),
-
-            _buildExpandableProgressCard(
-              id: 'Bronce',
-              label: 'Medalla de Bronce',
-              min: 0,
-              max: 100,
-              color: Colors.brown,
-              icon: Icons.emoji_events,
-              achievements: [
-                'Has ganado tus primeros puntos',
-                'Primer escaneo BLE completado',
-                'Participaste en una misión',
-              ],
-            ),
-            _buildExpandableProgressCard(
-              id: 'Plata',
-              label: 'Medalla de Plata',
-              min: 100,
-              max: 300,
-              color: Colors.grey,
-              icon: Icons.emoji_events,
-              achievements: [
-                '10 escaneos completados',
-                'Alcanzaste los 200 pts',
-              ],
-            ),
-            _buildExpandableProgressCard(
-              id: 'Oro',
-              label: 'Medalla de Oro',
-              min: 300,
-              max: 1000,
-              color: Colors.amber,
-              icon: Icons.emoji_events,
-              achievements: [
-                'Máquina de escanear',
-                '500 pts alcanzados',
-                'Modo experto desbloqueado',
-              ],
-            ),
-            _buildExpandableProgressCard(
-              id: 'Morada',
-              label: 'Medalla Morada',
-              min: 1000,
-              max: 2500,
-              color: Colors.purple,
-              icon: Icons.star,
-              achievements: [
-                'Gran Maestro BLE',
-                'Leyenda del escaneo',
-                'Todos los niveles completados',
-              ],
-            ),
-
-            const SizedBox(height: 16),
-            Center(
-              child: ElevatedButton.icon(
-                onPressed: () async {
-                  final prefs = await SharedPreferences.getInstance();
-                  await prefs.setInt('points', 0);
-                  setState(() => _points = 0);
-                },
-                icon: const Icon(Icons.restart_alt),
-                label: const Text('Reiniciar puntos'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.redAccent,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                ),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Puntos actuales: $_points',
+                style: Theme.of(context).textTheme.headlineSmall,
+                overflow: TextOverflow.ellipsis,
               ),
-            ),
-            const SizedBox(height: 24),
-          ],
+              const SizedBox(height: 20),
+
+              _buildExpandableProgressCard(
+                id: 'Bronce',
+                label: 'Medalla de Bronce',
+                min: 0,
+                max: 100,
+                color: Colors.brown,
+                icon: Icons.emoji_events,
+                achievements: [
+                  'Has ganado tus primeros puntos',
+                  'Primer escaneo BLE completado',
+                  'Participaste en una misión',
+                ],
+              ),
+              _buildExpandableProgressCard(
+                id: 'Plata',
+                label: 'Medalla de Plata',
+                min: 100,
+                max: 300,
+                color: Colors.grey,
+                icon: Icons.emoji_events,
+                achievements: [
+                  '10 escaneos completados',
+                  'Alcanzaste los 200 pts',
+                ],
+              ),
+              _buildExpandableProgressCard(
+                id: 'Oro',
+                label: 'Medalla de Oro',
+                min: 300,
+                max: 1000,
+                color: Colors.amber,
+                icon: Icons.emoji_events,
+                achievements: [
+                  'Máquina de escanear',
+                  '500 pts alcanzados',
+                  'Modo experto desbloqueado',
+                ],
+              ),
+              _buildExpandableProgressCard(
+                id: 'Morada',
+                label: 'Medalla Morada',
+                min: 1000,
+                max: 2500,
+                color: Colors.purple,
+                icon: Icons.star,
+                achievements: [
+                  'Gran Maestro BLE',
+                  'Leyenda del escaneo',
+                  'Todos los niveles completados',
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
