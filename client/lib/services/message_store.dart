@@ -14,6 +14,8 @@ class MessageStore {
   final Map<String, int> _lastBroadcastTime = {};
   // Track when each message was received
   final Map<String, int> _receivedTime = {};
+  // Track message origins (messageId -> origin)
+  final Map<String, String> _messageOrigins = {};
   // Track recent broadcasts for logging/display
   final List<String> _recentBroadcastLogs = [];
   
@@ -23,6 +25,7 @@ class MessageStore {
   static const int MAX_MESSAGES_TO_RELAY = 10; // Maximum number of messages to consider for relay
   static const int MAX_LOG_ENTRIES = 20; // Maximum number of log entries to keep
   static const int MESSAGE_EXPIRY_MS = 3600000; // Messages expire after 1 hour
+  static const int BOUNCE_PREVENTION_MS = 60000; // 1 minute to prevent bouncing
   
   // Broadcast rotation
   Timer? _broadcastTimer;
@@ -52,6 +55,18 @@ class MessageStore {
     String messageId = message.messageId;
     final now = DateTime.now().millisecondsSinceEpoch;
     
+    // Check if this is a message we originated recently
+    // If so, ignore it to prevent bouncing
+    if (message.hopCount == 0) {
+      // This is a new message we're originating
+      _messageOrigins[messageId] = 'self';
+      _logger.fine('Recording message origin as self: $messageId');
+    } else if (_messageOrigins.containsKey(messageId) && _messageOrigins[messageId] == 'self') {
+      // This is our own message that came back to us, ignore it
+      _logger.info('Ignoring message bounce: $messageId (our own message)');
+      return;
+    }
+    
     // Check if this is a new message or has a lower hop count
     bool isNewMessage = !_messages.containsKey(messageId);
     bool hasLowerHopCount = !isNewMessage && _messages[messageId]!.hopCount > message.hopCount;
@@ -60,6 +75,12 @@ class MessageStore {
       if (isNewMessage) {
         _logger.info('Adding new message: $messageId with hop count: ${message.hopCount}');
         _receivedTime[messageId] = now;
+        
+        // If not originated by us, mark as external
+        if (message.hopCount > 0 && !_messageOrigins.containsKey(messageId)) {
+          _messageOrigins[messageId] = 'external';
+          _logger.fine('Recording message origin as external: $messageId');
+        }
       } else {
         _logger.info('Updating message: $messageId with lower hop count: ${message.hopCount}');
       }
@@ -235,18 +256,49 @@ class MessageStore {
       _messages.remove(id);
       _lastBroadcastTime.remove(id);
       _receivedTime.remove(id);
+      _messageOrigins.remove(id);
     }
     
     if (expiredMessageIds.isNotEmpty) {
       _logger.info('Removed ${expiredMessageIds.length} expired messages');
       _addBroadcastLog('Removed ${expiredMessageIds.length} expired messages');
     }
+    
+    // Also clean up old message origins that don't have corresponding messages
+    final orphanedOrigins = _messageOrigins.keys.where((id) => !_messages.containsKey(id)).toList();
+    for (final id in orphanedOrigins) {
+      _messageOrigins.remove(id);
+    }
   }
   
   /// Get a human-readable description of a message
   String _getMessageDescription(BleMessage message) {
     if (message.msgType == MsgType.flightStatus) {
-      return 'Flight ${message.flightNumber} (${message.status.toString().split('.').last})';
+      String description = 'Flight ${message.flightNumber} (${message.status.toString().split('.').last})';
+      
+      // Add destination if available
+      if (message.destination != null && message.destination!.isNotEmpty) {
+        description += ' to ${message.destination}';
+      }
+      
+      // Add ETA if available
+      if (message.eta != null) {
+        final etaDateTime = DateTime.fromMillisecondsSinceEpoch(message.eta! * 1000);
+        final now = DateTime.now();
+        
+        // Calculate hours difference
+        final difference = etaDateTime.difference(now);
+        final hours = (difference.inMinutes / 60).round();
+        
+        if (hours > 0) {
+          description += ', ETA: $hours hr${hours != 1 ? 's' : ''}';
+        } else {
+          // If ETA is in the past or very close, show "arriving"
+          description += ', arriving';
+        }
+      }
+      
+      return description;
     } else {
       return 'Alert: ${message.alertMessage.toString().split('.').last}';
     }
@@ -272,6 +324,7 @@ class MessageStore {
     _messages.clear();
     _lastBroadcastTime.clear();
     _receivedTime.clear();
+    _messageOrigins.clear();
     _logger.info('Cleared all messages from store');
     _addBroadcastLog('Cleared all messages from store');
   }
