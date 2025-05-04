@@ -1063,7 +1063,7 @@ class _MyHomePageState extends State<MyHomePage> {
                     scale: _isScaled ? 1.25 : 1.0,
                     duration: const Duration(milliseconds: 450),
                     child: const Icon(
-                      Icons.inventory,
+                      Icons.airplane_ticket,
                       size: 64,
                       color: Color.fromARGB(255, 255, 255, 0),
                     ),
@@ -1314,7 +1314,5 @@ class _FloatingPlusState extends State<_FloatingPlus>
       ),
     );
   }
-  
 
 }
-
