@@ -804,6 +804,20 @@ class _MyHomePageState extends State<MyHomePage> {
             ),
             actions: [
               TextButton(
+                onPressed: () {
+                  setState(() {
+                    _activeAlerts.removeWhere(
+                      (a) =>
+                          a['alert_type'] == alert['alert_type'] &&
+                          a['timestamp'] == alert['timestamp'],
+                    );
+                  });
+                  Navigator.pop(context);
+                },
+                style: TextButton.styleFrom(foregroundColor: Colors.red),
+                child: const Text('Dismiss'),
+              ),
+              TextButton(
                 onPressed: () => Navigator.pop(context),
                 child: const Text('Close'),
               ),
